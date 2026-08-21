@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { agentInternals } from '../src/agents.mjs';
 import { VirtualWorkspace } from '../src/workspace.mjs';
 
@@ -25,4 +26,15 @@ test('tool executor exposes allowlisted workspace operations only', () => {
 
 test('tool arguments reject malformed JSON', () => {
   assert.throws(() => agentInternals.parseToolArguments({ function: { name: 'read_file', arguments: '{oops' } }));
+});
+
+test('prompt root resolution is compatible with Netlify bundled functions', () => {
+  const previous = process.env.LAMBDA_TASK_ROOT;
+  process.env.LAMBDA_TASK_ROOT = '/var/task';
+  try {
+    assert.equal(agentInternals.promptRootDir(), path.resolve('/var/task'));
+  } finally {
+    if (previous === undefined) delete process.env.LAMBDA_TASK_ROOT;
+    else process.env.LAMBDA_TASK_ROOT = previous;
+  }
 });
