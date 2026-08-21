@@ -1,4 +1,5 @@
 import { runCompactAgentPair } from '../../src/compact-agents.mjs';
+import { enforceExternalEffectsTruthfulness, taskWithExternalEffectsPolicy } from '../../src/external-effects-policy.mjs';
 import { starterWorkspace } from '../../src/fixture.mjs';
 import { assertSameOrigin, groqKey, json, parseBody, publicError, statusForError } from './_common.mjs';
 
@@ -88,12 +89,22 @@ export const handler = async event => {
     const seed = body.files && typeof body.files === 'object' && !Array.isArray(body.files) ? body.files : starterWorkspace;
     const events = [{ type: 'run_start', startedAt: new Date().toISOString(), mode: 'compact-free-tier' }];
     const emit = payload => events.push(payload);
-    const result = await withRateLimitAwareGroqFetch(() => runCompactAgentPair({
+    const protectedTask = taskWithExternalEffectsPolicy(task);
+    const rawResult = await withRateLimitAwareGroqFetch(() => runCompactAgentPair({
       apiKey: groqKey(),
-      task,
+      task: protectedTask,
       seed,
       emit,
     }));
+    const previousStatus = rawResult.status;
+    const result = enforceExternalEffectsTruthfulness(rawResult, task);
+    if (previousStatus === 'approved' && result.status === 'changes_requested') {
+      events.push({
+        type: 'cycle',
+        cycle: 'policy',
+        message: 'Product-truthfulness gate rejected a simulated external success state.',
+      });
+    }
     events.push({ type: 'result', result });
     return {
       statusCode: 200,
