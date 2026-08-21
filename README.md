@@ -23,7 +23,7 @@ Both defaults can be overridden with server-side environment variables. The prod
 - reads only repositories in `GITHUB_ALLOWED_REPOS`;
 - selects a bounded task-relevant snapshot from the repository default branch;
 - when a task explicitly names repository files, prioritizes those files and keeps extra context small;
-- runs DevAgent and ReviewerAgent as two separate bounded serverless invocations so a combined model run cannot exhaust a single function timeout;
+- runs DevAgent and ReviewerAgent as two separate bounded serverless invocations;
 - signs the DevAgent intermediate change set server-side before the Reviewer invocation;
 - ReviewerAgent reloads the repository snapshot and requires the same base branch/tree SHA before reviewing the signed changes;
 - blocks protected paths such as `.github/**`, `AGENTS.md`, environment/secrets, hosting and infra configuration;
@@ -35,7 +35,9 @@ The browser coordinates the two HTTP calls after one **Executar tarefa** click, 
 
 The GitHub mode **cannot** write to `main`/the default branch, merge PRs, deploy, change DNS/hosting, run arbitrary shell commands, or access repository/cloud secrets.
 
-## Required Netlify environment variables
+## Required hosting environment variables
+
+Configure these server-side on Vercel or Netlify:
 
 ```text
 OPENAI_API_KEY=...
@@ -59,16 +61,27 @@ MAX_COMPACT_REVIEW_CYCLES=2
 
 Secrets are server-side only. `/api/config` exposes only readiness booleans/model names/provider metadata. The repository allowlist is returned only after the operator key is accepted.
 
-## Netlify routes
+## Portable API routes
 
-- `GET /health`
+The browser uses the same public API paths on both supported hosts:
+
 - `GET /api/config`
 - `GET /api/starter`
-- `POST /api/run` — sandbox agent run; operator key is required when configured
+- `POST /api/run` — sandbox agent run
 - `GET /api/github/repos` — authenticated allowlist discovery
 - `POST /api/github/run` — authenticated repository snapshot + DevAgent stage
-- `POST /.netlify/functions/github-review` — internal authenticated ReviewerAgent stage called by the browser orchestrator
+- `POST /api/github/review` — authenticated ReviewerAgent stage
 - `POST /api/github/pr` — authenticated signed-proposal verification + branch/PR creation
+
+Netlify maps these paths to `netlify/functions/*`. Vercel maps them through the `api/` adapters, which reuse the same guarded handlers.
+
+### Vercel
+
+The OpenAI execution functions reserve a 300-second maximum duration. Keep Fluid Compute enabled on the project and redeploy after changing environment variables. The static frontend stays in `public/`; OpenAI and GitHub secrets remain server-side.
+
+### Netlify
+
+The existing Netlify runtime remains supported. The split DevAgent/ReviewerAgent flow avoids placing both model requests inside one short-lived function invocation.
 
 ## Current GitHub-mode limits
 
@@ -80,7 +93,7 @@ The next authority level should use an isolated ephemeral runner for cloning and
 
 ## Cost and latency control
 
-ForgePair uses bounded snapshots, compact plain-text envelopes, capped output tokens and low-latency reasoning settings. Each OpenAI request has a timeout below the observed serverless execution limit so the app can return a safe retryable error instead of an opaque platform timeout. OpenAI usage is returned by the API for observability, while billing/credit remains controlled in the OpenAI project. If API credit is exhausted, ForgePair fails safely instead of falling back to another provider.
+ForgePair uses bounded snapshots, compact plain-text envelopes, capped output tokens and low-latency reasoning settings. OpenAI usage is returned by the API for observability, while billing/credit remains controlled in the OpenAI project. If API credit is exhausted, ForgePair fails safely instead of falling back to another provider.
 
 ## Quality
 
@@ -88,7 +101,7 @@ ForgePair uses bounded snapshots, compact plain-text envelopes, capped output to
 npm run check
 ```
 
-CI runs the same command on pull requests and pushes to `main`. Unit tests cover virtual-workspace safety, reviewer normalization, product-truthfulness gates, GitHub allowlisting, protected paths, proposal signing/tamper resistance, signed review-stage tamper resistance, OpenAI response parsing and latency bounds.
+CI runs the same command on pull requests and pushes to `main`. Unit tests cover virtual-workspace safety, reviewer normalization, product-truthfulness gates, GitHub allowlisting, protected paths, proposal signing/tamper resistance, signed review-stage tamper resistance, OpenAI response parsing, latency bounds and Vercel adapter behavior.
 
 ## Local sandbox
 
@@ -96,4 +109,4 @@ CI runs the same command on pull requests and pushes to `main`. Unit tests cover
 npm start
 ```
 
-Open `http://127.0.0.1:3000`. The controlled GitHub write flow is implemented through the Netlify Functions runtime used in production.
+Open `http://127.0.0.1:3000`.
