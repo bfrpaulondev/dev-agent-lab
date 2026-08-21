@@ -11,7 +11,7 @@ export function json(statusCode, payload, headers = {}) {
 
 export function publicError(error) {
   const message = error instanceof Error ? error.message : 'Request failed.';
-  if (/API key|Groq|GitHub|Repository|proposal|base branch|operator access|Task must|workspace|rate|too many|request is too large|origin/i.test(message)) return message.slice(0, 300);
+  if (/API key|OpenAI|GitHub|Repository|proposal|base branch|operator access|Task must|workspace|rate|quota|billing|credit|too many|request is too large|origin/i.test(message)) return message.slice(0, 300);
   return 'The request could not be completed safely.';
 }
 
@@ -62,8 +62,8 @@ export function parseBody(event, maxBytes = 750_000) {
   try { return JSON.parse(raw || '{}'); } catch { throw Object.assign(new Error('Invalid JSON request.'), { statusCode: 400 }); }
 }
 
-export function groqKey() {
-  return process.env[['GROQ', 'API', 'KEY'].join('_')];
+export function openaiKey() {
+  return process.env[['OPENAI', 'API', 'KEY'].join('_')];
 }
 
 export const commonInternals = { accessHeader, isGitHubAction };
