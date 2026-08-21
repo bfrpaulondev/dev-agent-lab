@@ -27,6 +27,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/github/repos"
+  to = "/.netlify/functions/github-repos"
+  status = 200
+
+[[redirects]]
   from = "/api/github/run"
   to = "/.netlify/functions/github-run"
   status = 200
