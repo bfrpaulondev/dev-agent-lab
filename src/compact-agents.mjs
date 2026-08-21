@@ -6,23 +6,62 @@ const MAX_TASK_CHARS = 6_000;
 const MAX_DIFF_CHARS = 80_000;
 const MAX_CHANGES = 12;
 
-const DEV_SYSTEM = `You are DevAgent, a senior full-stack engineer. Prefer simple, proven solutions. Security is non-negotiable: validate untrusted input, do not expose secrets, do not invent backend behavior, and do not represent placeholders as complete. Match the existing project instead of rewriting unrelated code. Return JSON only. You are editing a bounded virtual repository; do not claim shell, GitHub, deploy, or external test access.`;
+const DEV_SYSTEM = `You are DevAgent, a senior full-stack engineer. Prefer simple, proven solutions. Security is non-negotiable: validate untrusted input, do not expose secrets, do not invent backend behavior, and do not represent placeholders as complete. Match the existing project instead of rewriting unrelated code. You are editing a bounded virtual repository; do not claim shell, GitHub, deploy, or external test access.
 
-const REVIEW_SYSTEM = `You are ReviewerAgent. Independently review the implementation against the task, security, correctness, accessibility, responsiveness and regressions. Be evidence-based and concise. Do not invent findings. A critical/high finding always requires changes. Return JSON only.`;
+Return ONLY this plain-text envelope, with no Markdown code fences and no JSON escaping:
+SUMMARY:
+<concise factual summary>
+<<<FILE path="relative/path">>>
+<complete raw UTF-8 file content>
+<<<END FILE>>>
 
-async function groqJson({ apiKey, model, messages, temperature = 0.1 }) {
+Repeat FILE blocks only for changed files. For a required deletion use exactly:
+<<<DELETE path="relative/path">>>
+
+If no file needs changing, return NO_CHANGES after SUMMARY. Never place the delimiter strings inside file content.`;
+
+const REVIEW_SYSTEM = `You are ReviewerAgent. Independently review the implementation against the task, security, correctness, accessibility, responsiveness and regressions. Be evidence-based and concise. Do not invent findings. A critical/high finding always requires changes.
+
+Return ONLY this plain-text envelope, with no Markdown fences and no JSON:
+VERDICT: approve|changes_requested
+SCORE: 0-100
+SUMMARY:
+<concise review summary>
+
+For each finding append:
+<<<FINDING>>>
+SEVERITY: critical|high|medium|low
+FILE: optional/relative/path
+TITLE: concise title
+DETAIL:
+<evidence-based detail>
+<<<END FINDING>>>
+
+If there are no findings, omit all FINDING blocks.`;
+
+function modelReasoningEffort(model) {
+  if (model === 'qwen/qwen3.6-27b') return 'none';
+  if (String(model || '').startsWith('openai/gpt-oss-')) return 'low';
+  return null;
+}
+
+async function groqText({ apiKey, model, messages, temperature = 0.1, maxCompletionTokens = 2400 }) {
+  const body = {
+    model,
+    messages,
+    temperature,
+    max_completion_tokens: maxCompletionTokens,
+  };
+  const reasoningEffort = modelReasoningEffort(model);
+  if (reasoningEffort) body.reasoning_effort = reasoningEffort;
+
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature,
-      response_format: { type: 'json_object' },
-    }),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(90_000),
   });
 
@@ -39,14 +78,73 @@ async function groqJson({ apiKey, model, messages, temperature = 0.1 }) {
   }
 
   const content = payload?.choices?.[0]?.message?.content;
-  if (typeof content !== 'string') throw new Error('Groq returned an invalid compact-agent response.');
-  let parsed;
-  try { parsed = JSON.parse(content); } catch { throw new Error('Compact agent returned invalid JSON.'); }
-  return { parsed, usage: payload.usage ?? null };
+  if (typeof content !== 'string' || !content.trim()) throw new Error('Groq returned an invalid compact-agent response.');
+  return { content, usage: payload.usage ?? null };
 }
 
 function workspacePayload(workspace) {
   return JSON.stringify(workspace.snapshot());
+}
+
+function parseDevEnvelope(raw) {
+  const text = String(raw || '').replace(/\r\n/g, '\n').trim();
+  const changesWithIndex = [];
+  const filePattern = /<<<FILE path="([^"\n]+)">>>\n([\s\S]*?)\n<<<END FILE>>>/g;
+  const deletePattern = /<<<DELETE path="([^"\n]+)">>>/g;
+  let match;
+
+  while ((match = filePattern.exec(text))) {
+    changesWithIndex.push({ index: match.index, change: { path: match[1].trim(), content: match[2] } });
+  }
+  while ((match = deletePattern.exec(text))) {
+    changesWithIndex.push({ index: match.index, change: { path: match[1].trim(), delete: true } });
+  }
+
+  changesWithIndex.sort((a, b) => a.index - b.index);
+  const changes = changesWithIndex.map(item => item.change);
+  if (!changes.length && !/\bNO_CHANGES\b/.test(text)) {
+    throw new Error('DevAgent returned an invalid file envelope.');
+  }
+
+  const firstChangeIndex = changesWithIndex[0]?.index ?? text.indexOf('NO_CHANGES');
+  const summaryStart = text.match(/^SUMMARY:\s*\n?/i)?.[0]?.length ?? 0;
+  const summaryEnd = firstChangeIndex >= 0 ? firstChangeIndex : text.length;
+  const summary = text.slice(summaryStart, summaryEnd).trim().slice(0, 2000) || `Updated ${changes.length} file(s).`;
+  return { summary, changes };
+}
+
+function parseReviewEnvelope(raw) {
+  const text = String(raw || '').replace(/\r\n/g, '\n').trim();
+  const verdictMatch = text.match(/^VERDICT:\s*(approve|changes_requested)\s*$/im);
+  if (!verdictMatch) throw new Error('ReviewerAgent returned an invalid review envelope.');
+  const scoreMatch = text.match(/^SCORE:\s*([0-9]{1,3}(?:\.[0-9]+)?)\s*$/im);
+
+  const findings = [];
+  const findingPattern = /<<<FINDING>>>\n([\s\S]*?)\n<<<END FINDING>>>/g;
+  let findingMatch;
+  while ((findingMatch = findingPattern.exec(text))) {
+    const block = findingMatch[1];
+    const severity = block.match(/^SEVERITY:\s*(critical|high|medium|low)\s*$/im)?.[1]?.toLowerCase() || 'medium';
+    const file = block.match(/^FILE:\s*(.*?)\s*$/im)?.[1]?.trim() || null;
+    const title = block.match(/^TITLE:\s*(.*?)\s*$/im)?.[1]?.trim() || 'Finding';
+    const detail = block.match(/^DETAIL:\s*\n([\s\S]*)$/im)?.[1]?.trim() || '';
+    findings.push({ severity, file, title, detail });
+  }
+
+  const summaryMarker = text.search(/^SUMMARY:\s*$/im);
+  let summary = 'Review completed.';
+  if (summaryMarker >= 0) {
+    const afterMarker = text.slice(summaryMarker).replace(/^SUMMARY:\s*\n?/i, '');
+    const firstFinding = afterMarker.indexOf('<<<FINDING>>>');
+    summary = (firstFinding >= 0 ? afterMarker.slice(0, firstFinding) : afterMarker).trim() || summary;
+  }
+
+  return {
+    verdict: verdictMatch[1].toLowerCase(),
+    score: Number(scoreMatch?.[1] || 0),
+    summary: summary.slice(0, 1600),
+    findings,
+  };
 }
 
 function applyCompactChanges(workspace, changes) {
@@ -96,35 +194,37 @@ function reviewerFeedback(review) {
 async function runCompactDev({ apiKey, task, workspace, reviewFeedback = '', emit = () => {}, model }) {
   emit({ type: 'agent_start', agent: 'dev', model });
   const user = reviewFeedback
-    ? `TASK:\n${task}\n\nVERIFIED REVIEW FINDINGS:\n${reviewFeedback}\n\nCURRENT WORKSPACE JSON:\n${workspacePayload(workspace)}\n\nCorrect only verified issues. Return JSON: {"summary":"...","changes":[{"path":"relative/path","content":"complete new UTF-8 file content"}]}. Use {"path":"...","delete":true} only when deletion is required.`
-    : `TASK:\n${task}\n\nWORKSPACE JSON:\n${workspacePayload(workspace)}\n\nImplement the smallest coherent solution. Return JSON: {"summary":"...","changes":[{"path":"relative/path","content":"complete new UTF-8 file content"}]}. Include only changed files. Use {"path":"...","delete":true} only when deletion is required.`;
+    ? `TASK:\n${task}\n\nVERIFIED REVIEW FINDINGS:\n${reviewFeedback}\n\nCURRENT WORKSPACE JSON:\n${workspacePayload(workspace)}\n\nCorrect only verified issues. Follow the exact plain-text FILE envelope from the system instruction.`
+    : `TASK:\n${task}\n\nWORKSPACE JSON:\n${workspacePayload(workspace)}\n\nImplement the smallest coherent solution. Follow the exact plain-text FILE envelope from the system instruction and include only changed files.`;
 
-  const response = await groqJson({
+  const response = await groqText({
     apiKey,
     model,
     messages: [{ role: 'system', content: DEV_SYSTEM }, { role: 'user', content: user }],
     temperature: 0.1,
+    maxCompletionTokens: 2600,
   });
-  const applied = applyCompactChanges(workspace, response.parsed?.changes);
+  const parsed = parseDevEnvelope(response.content);
+  const applied = applyCompactChanges(workspace, parsed.changes);
   for (const item of applied) emit({ type: 'tool_finish', agent: 'dev', tool: item.operation === 'delete' ? 'delete_file' : 'write_file', path: item.path, outcome: item.operation });
   const quality = workspace.qualityReport();
   emit({ type: 'tool_finish', agent: 'dev', tool: 'run_quality_checks', findings: quality.findings.length, outcome: 'checked' });
   emit({ type: 'tool_finish', agent: 'dev', tool: 'get_diff', changed: Boolean(workspace.diff()), outcome: 'inspected' });
-  const summary = String(response.parsed?.summary || `Updated ${applied.length} file(s).`).slice(0, 2000);
-  emit({ type: 'agent_finish', agent: 'dev', summary, turn: 1 });
-  return { summary, usage: response.usage, turns: 1 };
+  emit({ type: 'agent_finish', agent: 'dev', summary: parsed.summary, turn: 1 });
+  return { summary: parsed.summary, usage: response.usage, turns: 1 };
 }
 
 async function runCompactReviewer({ apiKey, task, workspace, quality, emit = () => {}, model }) {
   emit({ type: 'agent_start', agent: 'reviewer', model });
-  const user = `TASK:\n${task}\n\nQUALITY REPORT:\n${JSON.stringify(quality)}\n\nDIFF:\n${workspace.diff().slice(0, MAX_DIFF_CHARS) || '(no changes)'}\n\nReturn JSON only: {"verdict":"approve|changes_requested","score":0,"summary":"...","findings":[{"severity":"critical|high|medium|low","title":"...","detail":"...","file":"optional"}]}.`;
-  const response = await groqJson({
+  const user = `TASK:\n${task}\n\nQUALITY REPORT:\n${JSON.stringify(quality)}\n\nDIFF:\n${workspace.diff().slice(0, MAX_DIFF_CHARS) || '(no changes)'}\n\nFollow the exact plain-text review envelope from the system instruction.`;
+  const response = await groqText({
     apiKey,
     model,
     messages: [{ role: 'system', content: REVIEW_SYSTEM }, { role: 'user', content: user }],
     temperature: 0.05,
+    maxCompletionTokens: 1200,
   });
-  const review = normalizeReview(response.parsed);
+  const review = normalizeReview(parseReviewEnvelope(response.content));
   emit({ type: 'agent_finish', agent: 'reviewer', verdict: review.verdict, score: review.score, findings: review.findings.length, summary: review.summary });
   return { ...review, usage: response.usage };
 }
@@ -155,4 +255,4 @@ export async function runCompactAgentPair({ apiKey, task, seed, emit = () => {} 
   }
 }
 
-export const compactInternals = { applyCompactChanges, normalizeReview };
+export const compactInternals = { applyCompactChanges, normalizeReview, parseDevEnvelope, parseReviewEnvelope, modelReasoningEffort };
