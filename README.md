@@ -74,3 +74,22 @@ Health check: `GET /health`.
 ## CI
 
 GitHub Actions runs `npm run check` on pull requests and pushes to `main`. The Groq key is not required for CI because agent calls are not executed in the unit test suite.
+
+## Netlify deployment
+
+The repository includes a Netlify Functions runtime so the lab can run without a persistent Node server.
+
+Required Netlify environment variable:
+
+- `GROQ_API_KEY` — server-side only; never expose it to browser code or commit it.
+
+Optional variables:
+
+- `DEV_MODEL`
+- `REVIEW_MODEL`
+- `MAX_REVIEW_CYCLES`
+- `MAX_DEV_TURNS`
+
+`netlify.toml` publishes `public/` and routes `/health`, `/api/config`, `/api/starter`, and `/api/run` to functions under `netlify/functions/`.
+
+After configuring the secret, deploy the repository root. Verify `/health` reports `groqConfigured: true` before running an agent task.
