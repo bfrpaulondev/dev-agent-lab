@@ -124,21 +124,21 @@ function renderConfig() {
   $('devModel').textContent = state.config.devModel;
   $('reviewModel').textContent = state.config.reviewModel;
   const status = $('connectionStatus');
-  if (state.config.groqConfigured && state.config.githubConfigured && state.githubReposLoaded) {
+  if (state.config.openaiConfigured && state.config.githubConfigured && state.githubReposLoaded) {
     status.className = 'topbar-status ready';
-    status.innerHTML = '<span class="status-dot"></span><span>Groq + GitHub desbloqueados</span>';
-  } else if (state.config.groqConfigured && state.config.githubConfigured) {
+    status.innerHTML = '<span class="status-dot"></span><span>OpenAI + GitHub desbloqueados</span>';
+  } else if (state.config.openaiConfigured && state.config.githubConfigured) {
     status.className = 'topbar-status ready';
     status.innerHTML = '<span class="status-dot"></span><span>Serviços prontos · acesso bloqueado</span>';
-  } else if (state.config.groqConfigured && !state.config.accessConfigured) {
+  } else if (state.config.openaiConfigured && !state.config.accessConfigured) {
     status.className = 'topbar-status missing';
     status.innerHTML = '<span class="status-dot"></span><span>Configure FORGEPAIR_ACCESS_KEY</span>';
-  } else if (state.config.groqConfigured) {
+  } else if (state.config.openaiConfigured) {
     status.className = 'topbar-status ready';
-    status.innerHTML = '<span class="status-dot"></span><span>Groq pronto · GitHub incompleto</span>';
+    status.innerHTML = '<span class="status-dot"></span><span>OpenAI pronto · GitHub incompleto</span>';
   } else {
     status.className = 'topbar-status missing';
-    status.innerHTML = '<span class="status-dot"></span><span>Configure GROQ_API_KEY</span>';
+    status.innerHTML = '<span class="status-dot"></span><span>Configure OPENAI_API_KEY</span>';
   }
   $('unlockPanel').classList.toggle('hidden', !state.config.accessConfigured);
 }
@@ -167,7 +167,7 @@ async function runAgents() {
   if (state.running) return;
   const task = $('taskInput').value.trim();
   if (!task) return toast('Escreva uma tarefa primeiro.');
-  if (!state.config?.groqConfigured) return toast('Configure GROQ_API_KEY antes de executar.');
+  if (!state.config?.openaiConfigured) return toast('Configure OPENAI_API_KEY antes de executar.');
   if (state.config?.accessConfigured && !state.accessKey) return toast('Desbloqueie o ForgePair com a chave do operador.');
 
   const repo = selectedRepo();
