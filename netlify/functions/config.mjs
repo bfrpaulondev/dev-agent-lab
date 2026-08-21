@@ -1,12 +1,13 @@
 import { githubConfigured } from '../../src/github-runtime.mjs';
-import { groqKey, json, operatorAccessConfigured } from './_common.mjs';
+import { json, openaiKey, operatorAccessConfigured } from './_common.mjs';
 
 export const handler = async () => json(200, {
-  groqConfigured: Boolean(groqKey()),
+  openaiConfigured: Boolean(openaiKey()),
+  provider: 'openai',
   accessConfigured: operatorAccessConfigured(),
   githubConfigured: githubConfigured() && operatorAccessConfigured(),
-  devModel: process.env.DEV_MODEL || 'qwen/qwen3.6-27b',
-  reviewModel: process.env.REVIEW_MODEL || 'openai/gpt-oss-120b',
+  devModel: process.env.DEV_MODEL || 'gpt-5.4-mini',
+  reviewModel: process.env.REVIEW_MODEL || 'gpt-5-mini',
   maxReviewCycles: Number(process.env.MAX_REVIEW_CYCLES || 2),
   safety: [
     'sandbox mode remains virtual only',

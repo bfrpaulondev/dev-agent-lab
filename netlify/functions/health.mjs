@@ -1,7 +1,8 @@
-import { groqKey, json } from './_common.mjs';
+import { json, openaiKey } from './_common.mjs';
 
 export const handler = async () => json(200, {
   status: 'ok',
-  groqConfigured: Boolean(groqKey()),
+  provider: 'openai',
+  openaiConfigured: Boolean(openaiKey()),
   runtime: 'netlify-functions',
 });

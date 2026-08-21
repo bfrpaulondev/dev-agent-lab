@@ -2,7 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runAgentPair } from './src/agents.mjs';
+import { runCompactAgentPair } from './src/compact-agents.mjs';
 import { starterWorkspace } from './src/fixture.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -23,15 +23,22 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === 'GET' && url.pathname === '/health') {
-      return json(res, 200, { status: 'ok', groqConfigured: Boolean(process.env.GROQ_API_KEY) });
+      return json(res, 200, {
+        status: 'ok',
+        provider: 'openai',
+        openaiConfigured: Boolean(process.env.OPENAI_API_KEY),
+      });
     }
 
     if (req.method === 'GET' && url.pathname === '/api/config') {
       return json(res, 200, {
-        groqConfigured: Boolean(process.env.GROQ_API_KEY),
-        devModel: process.env.DEV_MODEL || 'qwen/qwen3.6-27b',
-        reviewModel: process.env.REVIEW_MODEL || 'openai/gpt-oss-120b',
-        maxReviewCycles: Number(process.env.MAX_REVIEW_CYCLES || 2),
+        provider: 'openai',
+        openaiConfigured: Boolean(process.env.OPENAI_API_KEY),
+        accessConfigured: false,
+        githubConfigured: false,
+        devModel: process.env.DEV_MODEL || 'gpt-5.4-mini',
+        reviewModel: process.env.REVIEW_MODEL || 'gpt-5-mini',
+        maxReviewCycles: Number(process.env.MAX_COMPACT_REVIEW_CYCLES || 2),
         safety: ['virtual workspace only', 'no shell', 'no GitHub writes', 'no production actions'],
       });
     }
@@ -43,6 +50,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/run') {
       assertSameOrigin(req);
       assertRateLimit(req);
+      if (!process.env.OPENAI_API_KEY) throw Object.assign(new Error('OPENAI_API_KEY is not configured on the server.'), { statusCode: 503 });
       const body = await readJsonBody(req);
       const task = typeof body.task === 'string' ? body.task : '';
       const seed = body.files && typeof body.files === 'object' && !Array.isArray(body.files) ? body.files : starterWorkspace;
@@ -55,10 +63,10 @@ const server = http.createServer(async (req, res) => {
       const send = payload => {
         if (!res.destroyed && !res.writableEnded) res.write(`${JSON.stringify(payload)}\n`);
       };
-      send({ type: 'run_start', startedAt: new Date().toISOString() });
+      send({ type: 'run_start', startedAt: new Date().toISOString(), mode: 'compact-openai' });
       try {
-        const result = await runAgentPair({
-          apiKey: process.env.GROQ_API_KEY,
+        const result = await runCompactAgentPair({
+          apiKey: process.env.OPENAI_API_KEY,
           task,
           seed,
           emit: send,
@@ -83,8 +91,8 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`DevAgent Lab running at http://${host}:${port}`);
-  console.log(`Groq configured: ${Boolean(process.env.GROQ_API_KEY)}`);
+  console.log(`ForgePair running at http://${host}:${port}`);
+  console.log(`OpenAI configured: ${Boolean(process.env.OPENAI_API_KEY)}`);
 });
 
 async function loadLocalEnv() {
@@ -170,7 +178,7 @@ async function serveStatic(pathname, res) {
 
 function publicError(error) {
   const message = error instanceof Error ? error.message : 'Request failed.';
-  if (/API key|Groq|Task must|workspace|rate|too many|request is too large|origin/i.test(message)) return message.slice(0, 300);
+  if (/API key|OpenAI|Task must|workspace|rate|quota|billing|credit|too many|request is too large|origin/i.test(message)) return message.slice(0, 300);
   return 'The request could not be completed safely.';
 }
 

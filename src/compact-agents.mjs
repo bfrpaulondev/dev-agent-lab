@@ -1,7 +1,8 @@
+import { openaiText } from './openai-provider.mjs';
 import { VirtualWorkspace } from './workspace.mjs';
 
-const DEFAULT_DEV_MODEL = 'qwen/qwen3.6-27b';
-const DEFAULT_REVIEW_MODEL = 'openai/gpt-oss-120b';
+const DEFAULT_DEV_MODEL = 'gpt-5.4-mini';
+const DEFAULT_REVIEW_MODEL = 'gpt-5-mini';
 const MAX_TASK_CHARS = 6_000;
 const MAX_DIFF_CHARS = 80_000;
 const MAX_CHANGES = 12;
@@ -39,47 +40,11 @@ DETAIL:
 
 If there are no findings, omit all FINDING blocks.`;
 
-function modelReasoningEffort(model) {
-  if (model === 'qwen/qwen3.6-27b') return 'none';
-  if (String(model || '').startsWith('openai/gpt-oss-')) return 'low';
-  return null;
-}
-
-async function groqText({ apiKey, model, messages, temperature = 0.1, maxCompletionTokens = 2400 }) {
-  const body = {
-    model,
-    messages,
-    temperature,
-    max_completion_tokens: maxCompletionTokens,
-  };
-  const reasoningEffort = modelReasoningEffort(model);
-  if (reasoningEffort) body.reasoning_effort = reasoningEffort;
-
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(90_000),
-  });
-
-  const raw = await response.text();
-  let payload;
-  try { payload = JSON.parse(raw); } catch { payload = null; }
-  if (!response.ok) {
-    const message = payload?.error?.message;
-    throw new Error(response.status === 401
-      ? 'Groq rejected the API key.'
-      : message
-        ? `Groq request failed: ${String(message).slice(0, 320)}`
-        : `Groq request failed (${response.status}).`);
-  }
-
-  const content = payload?.choices?.[0]?.message?.content;
-  if (typeof content !== 'string' || !content.trim()) throw new Error('Groq returned an invalid compact-agent response.');
-  return { content, usage: payload.usage ?? null };
+function modelReasoningEffort(model, agent = 'dev') {
+  const name = String(model || '');
+  if (name.startsWith('gpt-5.4-')) return agent === 'reviewer' ? 'none' : 'low';
+  if (name.startsWith('gpt-5')) return 'low';
+  return 'low';
 }
 
 function workspacePayload(workspace) {
@@ -197,12 +162,13 @@ async function runCompactDev({ apiKey, task, workspace, reviewFeedback = '', emi
     ? `TASK:\n${task}\n\nVERIFIED REVIEW FINDINGS:\n${reviewFeedback}\n\nCURRENT WORKSPACE JSON:\n${workspacePayload(workspace)}\n\nCorrect only verified issues. Follow the exact plain-text FILE envelope from the system instruction.`
     : `TASK:\n${task}\n\nWORKSPACE JSON:\n${workspacePayload(workspace)}\n\nImplement the smallest coherent solution. Follow the exact plain-text FILE envelope from the system instruction and include only changed files.`;
 
-  const response = await groqText({
+  const response = await openaiText({
     apiKey,
     model,
-    messages: [{ role: 'system', content: DEV_SYSTEM }, { role: 'user', content: user }],
-    temperature: 0.1,
-    maxCompletionTokens: 2600,
+    instructions: DEV_SYSTEM,
+    input: user,
+    reasoningEffort: modelReasoningEffort(model, 'dev'),
+    maxOutputTokens: 2_600,
   });
   const parsed = parseDevEnvelope(response.content);
   const applied = applyCompactChanges(workspace, parsed.changes);
@@ -217,12 +183,13 @@ async function runCompactDev({ apiKey, task, workspace, reviewFeedback = '', emi
 async function runCompactReviewer({ apiKey, task, workspace, quality, emit = () => {}, model }) {
   emit({ type: 'agent_start', agent: 'reviewer', model });
   const user = `TASK:\n${task}\n\nQUALITY REPORT:\n${JSON.stringify(quality)}\n\nDIFF:\n${workspace.diff().slice(0, MAX_DIFF_CHARS) || '(no changes)'}\n\nFollow the exact plain-text review envelope from the system instruction.`;
-  const response = await groqText({
+  const response = await openaiText({
     apiKey,
     model,
-    messages: [{ role: 'system', content: REVIEW_SYSTEM }, { role: 'user', content: user }],
-    temperature: 0.05,
-    maxCompletionTokens: 1200,
+    instructions: REVIEW_SYSTEM,
+    input: user,
+    reasoningEffort: modelReasoningEffort(model, 'reviewer'),
+    maxOutputTokens: 1_200,
   });
   const review = normalizeReview(parseReviewEnvelope(response.content));
   emit({ type: 'agent_finish', agent: 'reviewer', verdict: review.verdict, score: review.score, findings: review.findings.length, summary: review.summary });
@@ -230,7 +197,7 @@ async function runCompactReviewer({ apiKey, task, workspace, quality, emit = () 
 }
 
 export async function runCompactAgentPair({ apiKey, task, seed, emit = () => {} }) {
-  if (!apiKey) throw new Error('GROQ_API_KEY is not configured on the server.');
+  if (!apiKey) throw new Error('OPENAI_API_KEY is not configured on the server.');
   if (typeof task !== 'string' || !task.trim() || task.length > MAX_TASK_CHARS) throw new Error('Task must be between 1 and 6000 characters.');
 
   const devModel = process.env.DEV_MODEL || DEFAULT_DEV_MODEL;
