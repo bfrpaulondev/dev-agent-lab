@@ -14,17 +14,19 @@ This repository evaluates and operates a DevAgent + ReviewerAgent pair with two 
 - Never deploy, change hosting/DNS, mutate databases, or access cloud/production secrets.
 - Never modify `.github/**`, CI/workflows, `AGENTS.md`, environment/credential files, hosting configuration, Terraform/infra, or other protected paths in controlled GitHub mode.
 - ReviewerAgent is read-only and cannot mutate the workspace or GitHub.
+- The DevAgent intermediate GitHub change set must be server-signed before the ReviewerAgent invocation; the browser may coordinate stages but may not alter that signed state.
+- ReviewerAgent must reload the repository snapshot and reject the stage if the base branch/tree SHA changed after DevAgent.
 - A GitHub PR may only be created from the exact server-signed proposal produced after an approved DevAgent → ReviewerAgent run.
 - Before PR creation, re-check that the base branch SHA is unchanged. If it changed, require a fresh agent run.
 - Do not display hidden reasoning. UI may display actions, quality results, findings, concise summaries, diffs and PR metadata only.
 - Keep model IDs configurable via environment variables.
-- Every run must have deterministic request, workspace, file-count, file-size and review-cycle limits.
+- Every run must have deterministic request, workspace, file-count, file-size, model-time and review-cycle limits.
 
 ## Model-provider boundary
 - Production agent calls use the OpenAI Responses API with `OPENAI_API_KEY` server-side only.
-- Default DevAgent model is `gpt-5.4-mini`; default ReviewerAgent model is `gpt-5-mini`.
-- Do not silently fall back to another provider when OpenAI credit, quota, authentication, or rate limits fail.
-- Keep output-token and review-cycle caps explicit to control spend.
+- Default controlled-GitHub DevAgent and ReviewerAgent model is `gpt-5.4-mini` with `reasoning=none` for bounded latency.
+- Do not silently fall back to another provider when OpenAI credit, quota, authentication, rate limits, or latency limits fail.
+- Keep output-token, request-time and review-cycle caps explicit to control spend and serverless execution time.
 
 ## GitHub permission boundary
 Controlled GitHub mode may:
