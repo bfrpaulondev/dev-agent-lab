@@ -31,7 +31,9 @@ Both defaults can be overridden with server-side environment variables. The prod
 
 The GitHub mode **cannot** write to `main`/the default branch, merge PRs, deploy, change DNS/hosting, run arbitrary shell commands, or access repository/cloud secrets.
 
-## Required Netlify environment variables
+## Required hosting environment variables
+
+Configure these as server-side environment variables in Vercel or Netlify:
 
 ```text
 OPENAI_API_KEY=...
@@ -55,15 +57,25 @@ MAX_COMPACT_REVIEW_CYCLES=2
 
 Secrets are server-side only. `/api/config` exposes only readiness booleans/model names/provider metadata. The repository allowlist is returned only after the operator key is accepted.
 
-## Netlify routes
+## Vercel deployment
 
-- `GET /health`
+The `api/` directory adapts the existing guarded handlers to Vercel Functions while preserving the same browser API surface:
+
 - `GET /api/config`
 - `GET /api/starter`
-- `POST /api/run` — sandbox agent run; operator key is required when configured
-- `GET /api/github/repos` — authenticated allowlist discovery
-- `POST /api/github/run` — authenticated read of allowlisted repo + agent/reviewer run
-- `POST /api/github/pr` — authenticated signed-proposal verification + branch/PR creation
+- `POST /api/run`
+- `GET /api/github/repos`
+- `POST /api/github/run`
+- `POST /api/github/pr`
+- `GET /api/health`
+
+The two OpenAI execution routes (`/api/run` and `/api/github/run`) reserve a 300-second Vercel Function duration so a DevAgent → ReviewerAgent run is not constrained by the previous 30-second Netlify execution observed in production. Keep Fluid Compute enabled for the Vercel project and redeploy after changing environment variables.
+
+The static frontend remains in `public/`. No OpenAI or GitHub secret is embedded into static assets.
+
+## Netlify deployment
+
+The existing Netlify Functions remain supported through the original routes configured in `netlify.toml`, including `/health`, `/api/run` and the controlled GitHub endpoints.
 
 ## Current GitHub-mode limits
 
@@ -81,7 +93,7 @@ ForgePair intentionally uses bounded snapshots, compact plain-text envelopes, ca
 npm run check
 ```
 
-CI runs the same command on pull requests and pushes to `main`. Unit tests cover virtual-workspace safety, reviewer normalization, product-truthfulness gates, GitHub allowlisting, protected paths, proposal signing/tamper resistance, OpenAI response parsing and rate-limit handling.
+CI runs the same command on pull requests and pushes to `main`. Unit tests cover virtual-workspace safety, reviewer normalization, product-truthfulness gates, GitHub allowlisting, protected paths, proposal signing/tamper resistance, OpenAI response parsing/rate-limit handling, and the Vercel adapter/runtime-duration contract.
 
 ## Local sandbox
 
@@ -89,4 +101,4 @@ CI runs the same command on pull requests and pushes to `main`. Unit tests cover
 npm start
 ```
 
-Open `http://127.0.0.1:3000`. The controlled GitHub write flow is implemented through the Netlify Functions runtime used in production.
+Open `http://127.0.0.1:3000`. Production hosting can use either the existing Netlify Functions runtime or the Vercel `api/` adapters.
