@@ -1,6 +1,13 @@
 # ForgePair — DevAgent + ReviewerAgent
 
-ForgePair is a controlled coding-agent workspace powered by Groq. It keeps the in-memory sandbox and adds a guarded GitHub mode that can read an explicitly allowlisted repository, run DevAgent → ReviewerAgent, and open a pull request from an approved server-signed proposal.
+ForgePair is a controlled coding-agent workspace powered by the OpenAI API. It keeps the in-memory sandbox and adds a guarded GitHub mode that can read an explicitly allowlisted repository, run DevAgent → ReviewerAgent, and open a pull request from an approved server-signed proposal.
+
+## Default models
+
+- DevAgent: `gpt-5.4-mini` with low reasoning — strong cost-sensitive coding/subagent model.
+- ReviewerAgent: `gpt-5-mini` with low reasoning — independent lower-cost review.
+
+Both defaults can be overridden with server-side environment variables. The production agent path uses the OpenAI Responses API and never exposes the API key to the browser.
 
 ## Execution modes
 
@@ -15,6 +22,7 @@ ForgePair is a controlled coding-agent workspace powered by Groq. It keeps the i
 - requires operator authentication with `FORGEPAIR_ACCESS_KEY`;
 - reads only repositories in `GITHUB_ALLOWED_REPOS`;
 - selects a bounded task-relevant snapshot from the repository default branch;
+- when a task explicitly names repository files, prioritizes those files and keeps extra context small;
 - runs the same DevAgent → ReviewerAgent loop;
 - blocks protected paths such as `.github/**`, `AGENTS.md`, environment/secrets, hosting and infra configuration;
 - after approval, signs the exact proposed file changes server-side;
@@ -26,7 +34,7 @@ The GitHub mode **cannot** write to `main`/the default branch, merge PRs, deploy
 ## Required Netlify environment variables
 
 ```text
-GROQ_API_KEY=...
+OPENAI_API_KEY=...
 FORGEPAIR_ACCESS_KEY=...
 GITHUB_AGENT_TOKEN=...
 GITHUB_ALLOWED_REPOS=owner/repo,owner/second-repo
@@ -39,13 +47,13 @@ Use a fine-grained GitHub token restricted to the repositories you want ForgePai
 Optional model/loop variables:
 
 ```text
-DEV_MODEL=qwen/qwen3.6-27b
-REVIEW_MODEL=openai/gpt-oss-120b
+DEV_MODEL=gpt-5.4-mini
+REVIEW_MODEL=gpt-5-mini
 MAX_REVIEW_CYCLES=2
 MAX_COMPACT_REVIEW_CYCLES=2
 ```
 
-Secrets are server-side only. `/api/config` exposes only readiness booleans. The repository allowlist is returned only after the operator key is accepted.
+Secrets are server-side only. `/api/config` exposes only readiness booleans/model names/provider metadata. The repository allowlist is returned only after the operator key is accepted.
 
 ## Netlify routes
 
@@ -59,9 +67,13 @@ Secrets are server-side only. `/api/config` exposes only readiness booleans. The
 
 ## Current GitHub-mode limits
 
-This first authority level deliberately keeps repository context small to fit the current Groq TPM budget. It selects a small set of safe text files with deterministic file/workspace size bounds. It does not clone the repository or execute its real build/test scripts yet. The UI and PR body must not claim shell tests/builds/deploys were run.
+The first authority level deliberately keeps repository context small to reduce model cost and avoid irrelevant context. It selects a small set of safe text files with deterministic file/workspace size bounds. It does not clone the repository or execute its real build/test scripts yet. The UI and PR body must not claim shell tests/builds/deploys were run.
 
 The next authority level should use an isolated ephemeral runner for cloning and executing allowlisted test commands, while keeping merge/deploy/secrets outside the agent boundary.
+
+## Cost control
+
+ForgePair intentionally uses bounded snapshots, compact plain-text envelopes, capped output tokens and at most two Dev → Reviewer cycles. OpenAI usage is returned by the API for observability, while billing/credit remains controlled in the OpenAI project. If API credit is exhausted, ForgePair fails safely instead of falling back to another provider.
 
 ## Quality
 
@@ -69,7 +81,7 @@ The next authority level should use an isolated ephemeral runner for cloning and
 npm run check
 ```
 
-CI runs the same command on pull requests and pushes to `main`. Unit tests cover virtual-workspace safety, reviewer normalization, product-truthfulness gates, GitHub allowlisting, protected paths and proposal signing/tamper resistance.
+CI runs the same command on pull requests and pushes to `main`. Unit tests cover virtual-workspace safety, reviewer normalization, product-truthfulness gates, GitHub allowlisting, protected paths, proposal signing/tamper resistance, OpenAI response parsing and rate-limit handling.
 
 ## Local sandbox
 
@@ -77,4 +89,4 @@ CI runs the same command on pull requests and pushes to `main`. Unit tests cover
 npm start
 ```
 
-Open `http://127.0.0.1:3000`. Local Node server support remains focused on the sandbox; the controlled GitHub write flow is implemented through the Netlify Functions runtime used in production.
+Open `http://127.0.0.1:3000`. The controlled GitHub write flow is implemented through the Netlify Functions runtime used in production.
