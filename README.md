@@ -1,46 +1,62 @@
-# ForgePair — DevAgent + ReviewerAgent Lab
+# ForgePair — DevAgent + ReviewerAgent
 
-A safe first-stage laboratory for evaluating a Groq-powered coding agent pair before granting real GitHub, shell, cloud, or production permissions.
+ForgePair is a controlled coding-agent workspace powered by Groq. It keeps the original in-memory sandbox and adds a guarded GitHub mode that can read an explicitly allowlisted repository, run DevAgent → ReviewerAgent, and open a pull request from an approved server-signed proposal.
 
-## What this MVP does
+## Execution modes
 
-- DevAgent receives a task and operates on a bounded in-memory React/TypeScript workspace.
-- DevAgent can list/read/search/write/delete virtual files, inspect a diff and run deterministic quality checks.
-- ReviewerAgent is read-only and independently reviews the original task + diff + quality report.
-- If ReviewerAgent requests changes, findings are sent back to DevAgent for a correction cycle.
-- The browser shows an observable timeline of tool actions without exposing hidden reasoning.
-- Final code, diff, findings, quality report and review score stay visible in the UI.
+### Sandbox
 
-## Safety boundary in v0.1
+- bounded in-memory text workspace;
+- no shell or external writes;
+- DevAgent implements, deterministic checks run, ReviewerAgent reviews, and findings can return to DevAgent for correction.
 
-This version intentionally has **no arbitrary shell**, **no GitHub writes**, **no merge**, **no production deploy**, **no database**, and **no secret-management tools**. It is designed to answer one question first: *does the Dev → Review → Fix loop behave well enough to deserve more authority?*
+### Controlled GitHub mode
 
-## Models
+- reads only repositories in `GITHUB_ALLOWED_REPOS`;
+- selects a bounded task-relevant snapshot from the repository default branch;
+- runs the same DevAgent → ReviewerAgent loop;
+- blocks protected paths such as `.github/**`, `AGENTS.md`, environment/secrets, hosting and infra configuration;
+- after approval, signs the exact proposed file changes server-side;
+- only an intact, unexpired signed proposal can create one commit on a new `agent/...` branch and open a PR;
+- re-checks the base branch SHA immediately before PR creation.
 
-Defaults are configurable via environment variables:
+The GitHub mode **cannot** write to `main`/the default branch, merge PRs, deploy, change DNS/hosting, run arbitrary shell commands, or access repository/cloud secrets.
 
-- DevAgent: `qwen/qwen3.6-27b`
-- ReviewerAgent: `openai/gpt-oss-120b`
+## Required Netlify environment variables
 
-No model name is spread through application logic; change it with `DEV_MODEL` / `REVIEW_MODEL`.
-
-## Run locally
-
-1. Copy `.env.example` to `.env.local`.
-2. Put your Groq API key in `GROQ_API_KEY`.
-3. Run:
-
-```bash
-npm start
+```text
+GROQ_API_KEY=...
+GITHUB_AGENT_TOKEN=...
+GITHUB_ALLOWED_REPOS=owner/repo,owner/second-repo
 ```
 
-4. Open `http://127.0.0.1:3000`. The server binds to `0.0.0.0` by default for container/hosting compatibility.
+Use a fine-grained GitHub token restricted to the repositories you want ForgePair to access. For PR creation it needs repository permissions for **Contents: Read and write** and **Pull requests: Read and write**. Do not grant administration, workflows, actions secrets or organization-wide permissions.
 
-There are no runtime npm dependencies in v0.1; Node.js 22+ provides the HTTP server and `fetch` implementation.
+Optional model/loop variables:
 
-## Suggested first evaluation task
+```text
+DEV_MODEL=qwen/qwen3.6-27b
+REVIEW_MODEL=openai/gpt-oss-120b
+MAX_REVIEW_CYCLES=2
+MAX_COMPACT_REVIEW_CYCLES=2
+```
 
-Use the prefilled UI/UX task. It deliberately asks the DevAgent to redesign a primitive dashboard while preserving React/TypeScript, mobile support, accessibility and the no-new-dependency constraint. The ReviewerAgent should reject visual-only edits that introduce fixed desktop widths, inaccessible state communication, placeholder actions, or unnecessary dependencies.
+Environment variables are server-side only. The browser receives only booleans and the allowlisted repository names; tokens are never returned.
+
+## Netlify routes
+
+- `GET /health`
+- `GET /api/config`
+- `GET /api/starter`
+- `POST /api/run` — sandbox
+- `POST /api/github/run` — read allowlisted repo + agent/reviewer run
+- `POST /api/github/pr` — verify signed approved proposal + open branch/PR
+
+## Current GitHub-mode limits
+
+This first authority level deliberately keeps the repository context small to fit the current Groq TPM budget. It selects up to a small number of safe text files with deterministic file/workspace size bounds. It does not clone the repository or execute its real build/test scripts yet. The UI and PR body must not claim shell tests/builds/deploys were run.
+
+The next authority level should use an isolated ephemeral runner for cloning and executing allowlisted test commands, while keeping merge/deploy/secrets outside the agent boundary.
 
 ## Quality
 
@@ -48,48 +64,12 @@ Use the prefilled UI/UX task. It deliberately asks the DevAgent to redesign a pr
 npm run check
 ```
 
-This validates JavaScript syntax and runs safety/unit tests around the virtual workspace and reviewer normalization.
+CI runs the same command on pull requests and pushes to `main`. Unit tests cover virtual-workspace safety, reviewer normalization, product-truthfulness gates, GitHub allowlisting, protected paths and proposal signing/tamper resistance.
 
-## Next authority level (only after evaluation)
-
-If repeated runs are reliable, add GitHub tools in a second phase:
-
-- read repository tree/files;
-- create a feature branch;
-- write commits to that feature branch;
-- open a PR;
-- read CI results/diff.
-
-Keep `main` merge, force-push, production deploy, secrets, DNS and destructive resources physically absent from the agent tool registry until an explicit human approval layer exists.
-
-## Docker
+## Local sandbox
 
 ```bash
-docker build -t forgepair .
-docker run --rm -p 3000:3000 -e GROQ_API_KEY=your_key forgepair
+npm start
 ```
 
-Health check: `GET /health`.
-
-## CI
-
-GitHub Actions runs `npm run check` on pull requests and pushes to `main`. The Groq key is not required for CI because agent calls are not executed in the unit test suite.
-
-## Netlify deployment
-
-The repository includes a Netlify Functions runtime so the lab can run without a persistent Node server.
-
-Required Netlify environment variable:
-
-- `GROQ_API_KEY` — server-side only; never expose it to browser code or commit it.
-
-Optional variables:
-
-- `DEV_MODEL`
-- `REVIEW_MODEL`
-- `MAX_REVIEW_CYCLES`
-- `MAX_DEV_TURNS`
-
-`netlify.toml` publishes `public/` and routes `/health`, `/api/config`, `/api/starter`, and `/api/run` to functions under `netlify/functions/`.
-
-After configuring the secret, deploy the repository root. Verify `/health` reports `groqConfigured: true` before running an agent task.
+Open `http://127.0.0.1:3000`. Local Node server support remains focused on the sandbox; the controlled GitHub write flow is implemented through the Netlify Functions runtime used in production.
