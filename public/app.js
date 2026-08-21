@@ -1,9 +1,9 @@
 const $ = id => document.getElementById(id);
 
 const presets = {
-  visual: 'Redesenhe este dashboard para parecer um produto moderno, calmo e profissional. Use uma base off-white, teal profundo como cor primária, estados semânticos discretos, cards com menos bordas e uma hierarquia de ações clara. Garanta responsividade até 320px, foco visível e sem novas dependências. Não invente funcionalidade de backend.',
-  a11y: 'Revise a UI para acessibilidade e responsividade. Garanta landmarks claros, foco visível, estados que não dependam apenas de cor, touch targets adequados, leitura confortável em 320px e suporte a prefers-reduced-motion. Preserve o visual e não adicione dependências.',
-  states: 'Melhore a lista de tarefas para comunicar estados pending e done de forma semântica e acessível. Crie uma hierarquia visual clara, sem usar preto como acento principal e sem inventar ações de backend. Mantenha a UI responsiva até 320px.',
+  visual: 'Melhore a interface do projeto com hierarquia visual mais clara, responsividade até 320px e foco visível. Preserve a arquitetura e não adicione dependências sem necessidade.',
+  a11y: 'Revise a interface para acessibilidade: teclado, foco visível, landmarks, labels, contraste e responsividade. Corrija apenas problemas verificáveis e preserve o comportamento existente.',
+  security: 'Revise a implementação relacionada a esta tarefa buscando riscos concretos de segurança, validação de input, XSS, exposição de secrets e estados falsos de sucesso. Corrija apenas problemas verificáveis.',
 };
 
 const state = {
@@ -15,6 +15,8 @@ const state = {
   running: false,
   timeline: [],
   result: null,
+  proposalToken: null,
+  pr: null,
 };
 
 await init();
@@ -28,12 +30,15 @@ async function init() {
     const starter = await starterResponse.json();
     state.starterFiles = starter.files;
     state.currentFiles = structuredClone(starter.files);
+    populateProjects();
     renderConfig();
+    renderMode();
     renderFiles();
-  } catch (error) {
-    toast('Não foi possível inicializar o laboratório.');
-    $('connectionStatus').className = 'topbar-status missing';
-    $('connectionStatus').innerHTML = '<span class="status-dot"></span><span>Servidor indisponível</span>';
+  } catch {
+    toast('Não foi possível inicializar o ForgePair.');
+    const status = $('connectionStatus');
+    status.className = 'topbar-status missing';
+    status.innerHTML = '<span class="status-dot"></span><span>Servidor indisponível</span>';
   }
 }
 
@@ -42,8 +47,13 @@ function wireEvents() {
     $('taskInput').value = presets[button.dataset.preset];
     $('taskInput').focus();
   }));
+  $('projectSelect').addEventListener('change', () => {
+    resetRunState(false);
+    renderMode();
+  });
   $('runButton').addEventListener('click', runAgents);
-  $('resetButton').addEventListener('click', resetWorkspace);
+  $('resetButton').addEventListener('click', () => resetRunState(true));
+  $('openPrButton').addEventListener('click', openPullRequest);
   $('clearTimeline').addEventListener('click', () => {
     state.timeline = [];
     renderTimeline();
@@ -51,59 +61,89 @@ function wireEvents() {
   document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => switchCodeView(button.dataset.view)));
 }
 
+function populateProjects() {
+  const select = $('projectSelect');
+  for (const repo of state.config?.allowedRepos || []) {
+    const option = document.createElement('option');
+    option.value = `github:${repo}`;
+    option.textContent = repo;
+    select.appendChild(option);
+  }
+}
+
+function selectedRepo() {
+  const value = $('projectSelect').value;
+  return value.startsWith('github:') ? value.slice(7) : null;
+}
+
 function renderConfig() {
   $('devModel').textContent = state.config.devModel;
   $('reviewModel').textContent = state.config.reviewModel;
   const status = $('connectionStatus');
-  if (state.config.groqConfigured) {
+  if (state.config.groqConfigured && state.config.githubConfigured) {
     status.className = 'topbar-status ready';
-    status.innerHTML = '<span class="status-dot"></span><span>Groq pronto</span>';
+    status.innerHTML = '<span class="status-dot"></span><span>Groq + GitHub prontos</span>';
+  } else if (state.config.groqConfigured) {
+    status.className = 'topbar-status ready';
+    status.innerHTML = '<span class="status-dot"></span><span>Groq pronto · GitHub não configurado</span>';
   } else {
     status.className = 'topbar-status missing';
     status.innerHTML = '<span class="status-dot"></span><span>Configure GROQ_API_KEY</span>';
   }
 }
 
+function renderMode() {
+  const repo = selectedRepo();
+  $('continueRow').classList.toggle('hidden', Boolean(repo));
+  $('workspaceMode').textContent = repo ? 'GitHub controlado' : 'Sandbox local';
+  $('repoLabel').textContent = repo || 'Virtual repository';
+  $('workspaceContext').textContent = repo
+    ? `${repo} · default branch lida no servidor · PR somente em agent/...`
+    : 'Workspace virtual sem escrita externa.';
+  $('projectHelp').textContent = repo
+    ? 'O servidor lê uma snapshot limitada do repo. O browser nunca recebe o token GitHub.'
+    : state.config?.githubConfigured
+      ? 'Escolha um repositório para trabalhar com código real ou mantenha o sandbox.'
+      : 'GitHub ainda não está configurado no servidor; o sandbox continua disponível.';
+  $('safetyCopy').textContent = repo
+    ? 'GitHub: sem escrita em main, merge, deploy, workflows, infra ou secrets.'
+    : 'Sandbox: sem shell, GitHub write, merge, deploy ou secrets.';
+}
+
 async function runAgents() {
   if (state.running) return;
   const task = $('taskInput').value.trim();
   if (!task) return toast('Escreva uma tarefa primeiro.');
-  if (!state.config?.groqConfigured) return toast('Configure GROQ_API_KEY no servidor antes de executar.');
+  if (!state.config?.groqConfigured) return toast('Configure GROQ_API_KEY antes de executar.');
+
+  const repo = selectedRepo();
+  if (repo && !state.config?.githubConfigured) return toast('Configure o modo GitHub no servidor primeiro.');
 
   state.running = true;
   state.result = null;
+  state.proposalToken = null;
+  state.pr = null;
   state.diff = '';
   state.timeline = [];
   resetReviewPanel();
+  renderPrAction();
   setRunningUi(true);
 
-  const files = $('continueWorkspace').checked ? state.currentFiles : state.starterFiles;
   try {
-    const response = await fetch('/api/run', {
+    const endpoint = repo ? '/api/github/run' : '/api/run';
+    const payload = repo
+      ? { task, repo }
+      : { task, files: $('continueWorkspace').checked ? state.currentFiles : state.starterFiles };
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task, files }),
+      body: JSON.stringify(payload),
     });
     if (!response.ok) {
-      const payload = await response.json().catch(() => ({}));
-      throw new Error(payload.error || `Falha HTTP ${response.status}`);
+      const errorPayload = await response.json().catch(() => ({}));
+      throw new Error(errorPayload.error || `Falha HTTP ${response.status}`);
     }
-    if (!response.body) throw new Error('Resposta sem stream.');
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        handleEvent(JSON.parse(line));
-      }
-    }
-    if (buffer.trim()) handleEvent(JSON.parse(buffer));
+    await consumeNdjson(response);
   } catch (error) {
     handleEvent({ type: 'error', message: error instanceof Error ? error.message : 'Execução falhou.' });
   } finally {
@@ -112,20 +152,41 @@ async function runAgents() {
   }
 }
 
+async function consumeNdjson(response) {
+  if (!response.body) throw new Error('Resposta sem stream.');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      if (line.trim()) handleEvent(JSON.parse(line));
+    }
+  }
+  if (buffer.trim()) handleEvent(JSON.parse(buffer));
+}
+
 function handleEvent(event) {
-  const now = new Date();
+  const eventTime = event.at || event.startedAt ? new Date(event.at || event.startedAt) : new Date();
   if (event.type === 'run_start') {
-    addTimeline('system', 'Run iniciado', 'Workspace preparado e limites de segurança aplicados.', now);
+    const detail = event.mode === 'github-controlled'
+      ? `${event.repo}@${event.baseBranch} · ${event.snapshotFiles || 0} arquivo(s) selecionados`
+      : 'Workspace preparado e limites de segurança aplicados.';
+    addTimeline('system', 'Analisando projeto', detail, eventTime);
     return;
   }
   if (event.type === 'agent_start') {
     setAgentState(event.agent, 'running');
-    addTimeline(event.agent, `${labelAgent(event.agent)} iniciou`, event.model || '', now);
+    addTimeline(event.agent, `${labelAgent(event.agent)} iniciou`, event.model || '', eventTime);
     return;
   }
   if (event.type === 'tool_start') return;
   if (event.type === 'tool_finish') {
-    addTimeline(event.agent, toolTitle(event), toolDetail(event), now);
+    addTimeline(event.agent, toolTitle(event), toolDetail(event), eventTime);
     return;
   }
   if (event.type === 'agent_finish') {
@@ -135,29 +196,28 @@ function handleEvent(event) {
       $('reviewVerdict').textContent = event.verdict === 'approve' ? 'aprovado' : 'mudanças pedidas';
       $('reviewVerdict').className = `badge ${event.verdict === 'approve' ? '' : 'muted'}`;
     }
-    addTimeline(event.agent, `${labelAgent(event.agent)} concluiu`, event.summary || `${event.findings || 0} finding(s)`, now);
+    addTimeline(event.agent, `${labelAgent(event.agent)} concluiu`, event.summary || `${event.findings || 0} finding(s)`, eventTime);
     return;
   }
   if (event.type === 'cycle') {
-    addTimeline('system', `Ciclo ${event.cycle}`, event.message, now);
+    addTimeline('system', `Ciclo ${event.cycle}`, event.message, eventTime);
     return;
   }
   if (event.type === 'error') {
     $('resultPill').className = 'result-pill changes';
     $('resultPill').textContent = 'Execução falhou';
-    addTimeline('error', 'Erro seguro', event.message, now);
+    addTimeline('error', 'Erro seguro', event.message, eventTime);
     toast(event.message);
     return;
   }
-  if (event.type === 'result') {
-    applyResult(event.result);
-  }
+  if (event.type === 'result') applyResult(event.result);
 }
 
 function applyResult(result) {
   state.result = result;
-  state.currentFiles = result.files;
+  state.currentFiles = result.files || {};
   state.diff = result.diff || '';
+  state.proposalToken = result.proposalToken || null;
   const last = result.history?.at(-1);
   const review = last?.review;
   $('reviewScore').textContent = review ? String(review.score) : '—';
@@ -165,11 +225,20 @@ function applyResult(result) {
   $('qualityFindings').textContent = String(result.quality?.findings?.length ?? 0);
   $('reviewCycles').textContent = String(result.history?.length ?? 0);
   $('resultPill').className = `result-pill ${result.status === 'approved' ? 'approved' : 'changes'}`;
-  $('resultPill').textContent = result.status === 'approved' ? 'Reviewer aprovou' : 'Mudanças ainda necessárias';
+  $('resultPill').textContent = result.status === 'approved' ? 'Pronto para revisão final' : 'Mudanças necessárias';
   renderReview(review);
+  renderQuality(result.quality?.findings || []);
   renderFiles();
   $('diffContent').textContent = state.diff || 'Nenhuma alteração.';
-  addTimeline('system', 'Resultado consolidado', result.status === 'approved' ? 'O ReviewerAgent aprovou o estado final.' : 'O limite de ciclos terminou com findings pendentes.', new Date());
+  if (result.github) {
+    $('workspaceContext').textContent = `${result.github.repo}@${result.github.baseBranch} · snapshot ${result.github.snapshotFiles} arquivo(s) · base ${String(result.github.baseSha).slice(0, 8)}`;
+  }
+  renderPrAction();
+  addTimeline('system', 'Resultado consolidado',
+    result.status === 'approved'
+      ? state.proposalToken ? 'Gates aprovados. O PR pode ser criado manualmente.' : 'Reviewer aprovou o estado final.'
+      : 'O run terminou com findings pendentes.',
+    new Date());
 }
 
 function renderReview(review) {
@@ -186,25 +255,83 @@ function renderReview(review) {
     root.appendChild(empty);
     return;
   }
-  for (const finding of review.findings) {
-    const item = document.createElement('article');
-    item.className = `finding ${finding.severity}`;
-    const header = document.createElement('div');
-    header.className = 'finding-header';
-    const title = document.createElement('strong');
-    title.textContent = finding.title;
-    const severity = document.createElement('em');
-    severity.textContent = finding.severity;
-    header.append(title, severity);
-    const detail = document.createElement('p');
-    detail.textContent = finding.detail;
-    item.append(header, detail);
-    if (finding.file) {
-      const file = document.createElement('code');
-      file.textContent = finding.file;
-      item.appendChild(file);
-    }
-    root.appendChild(item);
+  for (const finding of review.findings) root.appendChild(findingElement(finding));
+}
+
+function renderQuality(findings) {
+  const root = $('qualityDetails');
+  root.textContent = '';
+  if (!findings.length) return;
+  const heading = document.createElement('strong');
+  heading.textContent = 'Quality determinístico';
+  root.appendChild(heading);
+  for (const finding of findings) {
+    const line = document.createElement('p');
+    line.textContent = `${finding.severity || 'info'} · ${finding.file || 'workspace'} · ${finding.message || finding.title || 'finding'}`;
+    root.appendChild(line);
+  }
+}
+
+function findingElement(finding) {
+  const item = document.createElement('article');
+  item.className = `finding ${finding.severity}`;
+  const header = document.createElement('div');
+  header.className = 'finding-header';
+  const title = document.createElement('strong');
+  title.textContent = finding.title;
+  const severity = document.createElement('em');
+  severity.textContent = finding.severity;
+  header.append(title, severity);
+  const detail = document.createElement('p');
+  detail.textContent = finding.detail;
+  item.append(header, detail);
+  if (finding.file) {
+    const file = document.createElement('code');
+    file.textContent = finding.file;
+    item.appendChild(file);
+  }
+  return item;
+}
+
+async function openPullRequest() {
+  if (!state.proposalToken || state.running) return;
+  $('openPrButton').disabled = true;
+  $('openPrButton').textContent = 'Abrindo PR…';
+  try {
+    const response = await fetch('/api/github/pr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ proposalToken: state.proposalToken }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `Falha HTTP ${response.status}`);
+    state.pr = payload;
+    state.proposalToken = null;
+    addTimeline('system', `PR #${payload.number} criado`, `${payload.branch} · nenhum merge foi executado`, new Date());
+    renderPrAction();
+    toast(`PR #${payload.number} criado.`);
+  } catch (error) {
+    toast(error instanceof Error ? error.message : 'Falha ao abrir PR.');
+    $('openPrButton').disabled = false;
+    $('openPrButton').textContent = 'Abrir PR no GitHub';
+  }
+}
+
+function renderPrAction() {
+  const button = $('openPrButton');
+  const result = $('prResult');
+  button.classList.toggle('hidden', !state.proposalToken);
+  button.disabled = !state.proposalToken;
+  button.textContent = 'Abrir PR no GitHub';
+  result.classList.toggle('hidden', !state.pr);
+  result.textContent = '';
+  if (state.pr) {
+    const link = document.createElement('a');
+    link.href = state.pr.url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = `Abrir PR #${state.pr.number} · ${state.pr.branch}`;
+    result.appendChild(link);
   }
 }
 
@@ -217,14 +344,18 @@ function resetReviewPanel() {
   $('reviewVerdict').className = 'badge muted';
   $('reviewSummary').textContent = 'O ReviewerAgent ainda não analisou nenhuma alteração.';
   $('reviewFindings').textContent = '';
+  $('qualityDetails').textContent = '';
 }
 
 function renderFiles() {
   const files = Object.keys(state.currentFiles).sort();
-  if (!files.length) return;
-  if (!state.selectedFile || !(state.selectedFile in state.currentFiles)) state.selectedFile = files[0];
   const root = $('fileList');
   root.textContent = '';
+  if (!files.length) {
+    $('fileContent').textContent = '';
+    return;
+  }
+  if (!state.selectedFile || !(state.selectedFile in state.currentFiles)) state.selectedFile = files[0];
   for (const file of files) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -240,12 +371,14 @@ function renderFiles() {
   $('fileContent').textContent = state.currentFiles[state.selectedFile] || '';
 }
 
-function resetWorkspace() {
+function resetRunState(showToast) {
   if (state.running) return;
   state.currentFiles = structuredClone(state.starterFiles);
   state.selectedFile = null;
   state.diff = '';
   state.result = null;
+  state.proposalToken = null;
+  state.pr = null;
   state.timeline = [];
   $('continueWorkspace').checked = false;
   $('diffContent').textContent = 'Nenhuma alteração ainda.';
@@ -254,7 +387,9 @@ function resetWorkspace() {
   resetReviewPanel();
   renderTimeline();
   renderFiles();
-  toast('Sandbox resetado.');
+  renderPrAction();
+  renderMode();
+  if (showToast) toast('Workspace resetado.');
 }
 
 function switchCodeView(view) {
@@ -270,7 +405,8 @@ function switchCodeView(view) {
 function setRunningUi(running) {
   $('runButton').disabled = running;
   $('resetButton').disabled = running;
-  $('runButton').textContent = running ? 'Agentes trabalhando…' : 'Executar agentes';
+  $('projectSelect').disabled = running;
+  $('runButton').textContent = running ? 'Agentes trabalhando…' : 'Executar tarefa';
   if (running) {
     $('resultPill').className = 'result-pill running';
     $('resultPill').textContent = 'Executando';
@@ -286,7 +422,12 @@ function setAgentState(agent, value) {
 }
 
 function addTimeline(agent, title, detail, time = new Date()) {
-  state.timeline.push({ agent, title, detail, time: time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) });
+  state.timeline.push({
+    agent,
+    title,
+    detail,
+    time: time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+  });
   if (state.timeline.length > 80) state.timeline.shift();
   renderTimeline();
 }
@@ -295,7 +436,7 @@ function renderTimeline() {
   const root = $('timeline');
   root.textContent = '';
   if (!state.timeline.length) {
-    root.innerHTML = '<div class="empty-state"><span>◎</span><p>As ações dos agentes aparecem aqui sem expor raciocínio privado.</p></div>';
+    root.innerHTML = '<div class="empty-state"><span>◎</span><p>Analisando → Implementando → Quality checks → Reviewer → Pronto.</p></div>';
     return;
   }
   for (const event of state.timeline) {
@@ -322,7 +463,14 @@ function renderTimeline() {
 
 function toolTitle(event) {
   const names = {
-    list_files: 'Listou arquivos', read_file: 'Leu arquivo', search_files: 'Pesquisou código', write_file: 'Alterou arquivo', delete_file: 'Removeu arquivo', run_quality_checks: 'Executou quality checks', get_diff: 'Inspecionou diff', finish_task: 'Finalizou implementação',
+    list_files: 'Listou arquivos',
+    read_file: 'Leu arquivo',
+    search_files: 'Pesquisou código',
+    write_file: 'Alterou arquivo',
+    delete_file: 'Removeu arquivo',
+    run_quality_checks: 'Executou quality checks',
+    get_diff: 'Inspecionou diff',
+    finish_task: 'Finalizou implementação',
   };
   return names[event.tool] || event.tool;
 }
@@ -346,5 +494,5 @@ function toast(message) {
   el.textContent = message;
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3800);
 }
