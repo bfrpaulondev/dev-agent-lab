@@ -7,6 +7,7 @@ import {
   isProtectedWritePath,
   selectSnapshotEntries,
   verifyProposalToken,
+  githubInternals,
 } from '../src/github-runtime.mjs';
 
 function withGitHubEnv(fn) {
@@ -38,6 +39,8 @@ test('GitHub write policy blocks workflows, infra, agent policy and secrets', ()
     'infra/main.tf',
     'netlify.toml',
     'keys/server.pem',
+    'node_modules/pkg/index.js',
+    'dist/app.js',
   ]) assert.equal(isProtectedWritePath(file), true, file);
   assert.equal(isProtectedWritePath('src/App.tsx'), false);
 });
@@ -63,6 +66,7 @@ test('approved proposal token is signed and tamper-evident', () => withGitHubEnv
     baseTreeSha: 'tree123',
     files: { 'src/App.tsx': 'before' },
     metadata: { 'src/App.tsx': { sha: 'blob1', mode: '100644' } },
+    existingPaths: new Set(['src/App.tsx']),
   };
   const result = {
     status: 'approved',
@@ -88,4 +92,29 @@ test('protected changes can never remain approved even if reviewer approved them
   assert.equal(result.status, 'changes_requested');
   assert.equal(result.history[0].review.verdict, 'changes_requested');
   assert.equal(result.history[0].review.findings.at(-1).severity, 'high');
+});
+
+test('write gate blocks replacing an existing repository file that was not in the reviewed snapshot', () => {
+  const result = {
+    status: 'approved',
+    files: { 'src/hidden.ts': 'replacement' },
+    operations: [{ path: 'src/hidden.ts' }],
+    history: [{ review: { verdict: 'approve', score: 100, summary: 'Looks good', findings: [] } }],
+  };
+  const snapshot = {
+    files: { 'src/App.tsx': 'visible' },
+    existingPaths: new Set(['src/App.tsx', 'src/hidden.ts']),
+  };
+  enforceGitHubWritePolicy(result, snapshot);
+  assert.equal(result.status, 'changes_requested');
+  assert.match(result.history[0].review.findings.at(-1).title, /unseen existing/i);
+});
+
+test('proposal branch name is deterministic so replay cannot create a second branch', () => {
+  const one = githubInternals.branchSlug('Fix login UI', 'same-proposal-token');
+  const two = githubInternals.branchSlug('Fix login UI', 'same-proposal-token');
+  const other = githubInternals.branchSlug('Fix login UI', 'different-proposal-token');
+  assert.equal(one, two);
+  assert.notEqual(one, other);
+  assert.match(one, /^agent\//);
 });
