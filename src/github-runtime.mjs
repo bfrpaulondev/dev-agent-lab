@@ -83,6 +83,7 @@ export function isProtectedWritePath(filePath) {
   if (normalized === '.github' || normalized.startsWith('.github/')) return true;
   if (normalized.startsWith('.git/')) return true;
   if (normalized.startsWith('infra/') || normalized.startsWith('terraform/')) return true;
+  if (normalized.startsWith('node_modules/') || normalized.startsWith('dist/') || normalized.startsWith('build/') || normalized.startsWith('.next/') || normalized.startsWith('coverage/')) return true;
   if (/\.tf(?:vars)?$/i.test(normalized)) return true;
   if (isSensitivePath(normalized)) return true;
   return false;
@@ -187,6 +188,7 @@ export async function loadRepositorySnapshot(repoInput, task) {
   if (!baseTreeSha) throw new Error('Could not resolve the repository tree.');
   const tree = await githubRequest(`/repos/${repo}/git/trees/${baseTreeSha}?recursive=1`);
 
+  const existingPaths = new Set((tree?.tree || []).map(entry => entry.path).filter(Boolean));
   const ranked = selectSnapshotEntries(tree?.tree, task);
   const files = {};
   const metadata = {};
@@ -206,7 +208,7 @@ export async function loadRepositorySnapshot(repoInput, task) {
   }
 
   if (!Object.keys(files).length) throw Object.assign(new Error('No safe text files could be loaded from the repository.'), { statusCode: 422 });
-  return { repo, baseBranch, baseSha, baseTreeSha, files, metadata, snapshotBytes: total };
+  return { repo, baseBranch, baseSha, baseTreeSha, files, metadata, existingPaths, snapshotBytes: total };
 }
 
 function ensureHighFinding(result, finding) {
@@ -218,7 +220,7 @@ function ensureHighFinding(result, finding) {
   result.status = 'changes_requested';
 }
 
-export function enforceGitHubWritePolicy(result) {
+export function enforceGitHubWritePolicy(result, snapshot = null) {
   const paths = [...new Set((result?.operations || []).map(item => item.path).filter(Boolean))];
   const blocked = paths.filter(isProtectedWritePath);
   if (blocked.length) {
@@ -227,6 +229,20 @@ export function enforceGitHubWritePolicy(result) {
       title: 'Protected GitHub path',
       detail: `Controlled GitHub mode cannot modify protected paths: ${blocked.join(', ')}`,
       file: blocked[0],
+    });
+  }
+
+  const unseenExisting = snapshot?.existingPaths
+    ? paths.filter(filePath =>
+        !Object.prototype.hasOwnProperty.call(snapshot.files || {}, filePath) &&
+        snapshot.existingPaths.has(filePath))
+    : [];
+  if (unseenExisting.length) {
+    ensureHighFinding(result, {
+      severity: 'high',
+      title: 'Unseen existing file',
+      detail: `The agent attempted to replace repository files that were not present in its reviewed snapshot: ${unseenExisting.join(', ')}`,
+      file: unseenExisting[0],
     });
   }
   return result;
@@ -238,6 +254,7 @@ function changedFilesForProposal(snapshot, result) {
   for (const filePath of paths) {
     if (isProtectedWritePath(filePath)) throw new Error(`Protected GitHub path: ${filePath}`);
     const beforeExists = Object.prototype.hasOwnProperty.call(snapshot.files, filePath);
+    if (!beforeExists && snapshot.existingPaths?.has(filePath)) throw new Error(`Cannot replace unseen existing GitHub file: ${filePath}`);
     const afterExists = Object.prototype.hasOwnProperty.call(result.files || {}, filePath);
     if (beforeExists && afterExists && snapshot.files[filePath] === result.files[filePath]) continue;
     if (!afterExists) {
@@ -302,11 +319,12 @@ export function verifyProposalToken(token) {
   return proposal;
 }
 
-function branchSlug(task) {
+function branchSlug(task, proposalToken) {
   const slug = String(task || '')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 38) || 'task';
-  return `agent/${slug}-${Date.now().toString(36)}`;
+  const suffix = crypto.createHash('sha256').update(String(proposalToken || '')).digest('hex').slice(0, 10);
+  return `agent/${slug}-${suffix}`;
 }
 
 export async function openPullRequestFromProposal(proposalToken) {
@@ -342,7 +360,7 @@ export async function openPullRequestFromProposal(proposalToken) {
     }),
   });
 
-  const branch = branchSlug(proposal.task);
+  const branch = branchSlug(proposal.task, proposalToken);
   await githubRequest(`/repos/${proposal.repo}/git/refs`, {
     method: 'POST',
     body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: commit.sha }),
@@ -379,4 +397,5 @@ export const githubInternals = {
   selectSnapshotEntries,
   scorePath,
   changedFilesForProposal,
+  branchSlug,
 };
