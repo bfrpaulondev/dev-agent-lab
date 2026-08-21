@@ -1,14 +1,14 @@
 {
   "name": "devagent-reviewer-lab",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "Safe DevAgent + ReviewerAgent lab with controlled GitHub PR flow powered by Groq.",
+  "description": "Safe DevAgent + ReviewerAgent lab with controlled GitHub PR flow powered by the OpenAI API.",
   "scripts": {
     "dev": "node --watch server.mjs",
     "start": "node server.mjs",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check server.mjs && node --check src/agents.mjs && node --check src/compact-agents.mjs && node --check src/github-runtime.mjs && node --check src/workspace.mjs && node --check netlify/functions/github-repos.mjs && node --check netlify/functions/github-run.mjs && node --check netlify/functions/github-pr.mjs && node --check public/app.js && npm test",
+    "check": "node --check server.mjs && node --check src/agents.mjs && node --check src/compact-agents.mjs && node --check src/openai-provider.mjs && node --check src/github-runtime.mjs && node --check src/vercel-adapter.mjs && node --check src/workspace.mjs && node --check netlify/functions/github-repos.mjs && node --check netlify/functions/github-run.mjs && node --check netlify/functions/github-pr.mjs && node --check api/run.mjs && node --check api/github/run.mjs && node --check api/github/repos.mjs && node --check api/github/pr.mjs && node --check public/app.js && npm test",
     "smoke": "node scripts/smoke-agent.mjs"
   },
   "engines": {
