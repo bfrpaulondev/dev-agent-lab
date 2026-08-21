@@ -1,4 +1,4 @@
-import { runAgentPair } from '../../src/agents.mjs';
+import { runCompactAgentPair } from '../../src/compact-agents.mjs';
 import { starterWorkspace } from '../../src/fixture.mjs';
 import { assertSameOrigin, groqKey, json, parseBody, publicError, statusForError } from './_common.mjs';
 
@@ -86,9 +86,9 @@ export const handler = async event => {
     const body = parseBody(event);
     const task = typeof body.task === 'string' ? body.task : '';
     const seed = body.files && typeof body.files === 'object' && !Array.isArray(body.files) ? body.files : starterWorkspace;
-    const events = [{ type: 'run_start', startedAt: new Date().toISOString() }];
+    const events = [{ type: 'run_start', startedAt: new Date().toISOString(), mode: 'compact-free-tier' }];
     const emit = payload => events.push(payload);
-    const result = await withRateLimitAwareGroqFetch(() => runAgentPair({
+    const result = await withRateLimitAwareGroqFetch(() => runCompactAgentPair({
       apiKey: groqKey(),
       task,
       seed,
