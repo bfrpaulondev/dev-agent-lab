@@ -3,9 +3,6 @@ import { json, openaiKey, operatorAccessConfigured } from './_common.mjs';
 
 export const handler = async () => json(200, {
   openaiConfigured: Boolean(openaiKey()),
-  // Temporary compatibility flag for the existing browser bundle. It now means
-  // "model provider configured" and will be removed once the UI label migration lands.
-  groqConfigured: Boolean(openaiKey()),
   provider: 'openai',
   accessConfigured: operatorAccessConfigured(),
   githubConfigured: githubConfigured() && operatorAccessConfigured(),
