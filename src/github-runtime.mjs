@@ -111,7 +111,10 @@ function taskTokens(task) {
 
 function scorePath(filePath, task) {
   const pathLower = filePath.toLowerCase();
+  const taskPathText = String(task || '').replace(/\\/g, '/').toLowerCase();
+  const basename = pathLower.split('/').pop() || '';
   let score = 0;
+  if (taskPathText.includes(pathLower) || (basename.length >= 4 && taskPathText.includes(basename))) score += 5_000;
   if (ALWAYS_READ.has(filePath)) score += filePath === 'AGENTS.md' ? 1200 : filePath === 'package.json' ? 700 : 450;
   if (/^(src|app|pages|public|lib|server|api)\//.test(pathLower)) score += 80;
   if (/(app|main|index|server|route|controller|service|styles?)\.[a-z0-9]+$/.test(pathLower)) score += 110;
