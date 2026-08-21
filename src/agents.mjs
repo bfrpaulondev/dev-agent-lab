@@ -1,10 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { VirtualWorkspace } from './workspace.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const rootDir = path.resolve(__dirname, '..');
+function promptRootDir() {
+  const lambdaRoot = process.env.LAMBDA_TASK_ROOT;
+  return typeof lambdaRoot === 'string' && lambdaRoot.trim() ? path.resolve(lambdaRoot) : process.cwd();
+}
 
 const DEFAULT_DEV_MODEL = 'qwen/qwen3.6-27b';
 const DEFAULT_REVIEW_MODEL = 'openai/gpt-oss-120b';
@@ -97,7 +98,7 @@ const toolDefinitions = [
 ];
 
 async function loadPrompt(name) {
-  return fs.readFile(path.join(rootDir, 'prompts', name), 'utf8');
+  return fs.readFile(path.join(promptRootDir(), 'prompts', name), 'utf8');
 }
 
 async function groqChat({ apiKey, model, messages, tools, responseFormat, temperature = 0.2 }) {
@@ -303,4 +304,4 @@ export async function runAgentPair({ apiKey, task, seed, emit = () => {} }) {
   }
 }
 
-export const agentInternals = { normalizeReview, executeTool, parseToolArguments };
+export const agentInternals = { normalizeReview, executeTool, parseToolArguments, promptRootDir };
