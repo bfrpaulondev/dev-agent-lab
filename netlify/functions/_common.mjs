@@ -9,7 +9,7 @@ export function json(statusCode, payload, headers = {}) {
 
 export function publicError(error) {
   const message = error instanceof Error ? error.message : 'Request failed.';
-  if (/API key|Groq|Task must|workspace|rate|too many|request is too large|origin/i.test(message)) return message.slice(0, 300);
+  if (/API key|Groq|GitHub|Repository|proposal|base branch|Task must|workspace|rate|too many|request is too large|origin/i.test(message)) return message.slice(0, 300);
   return 'The request could not be completed safely.';
 }
 
