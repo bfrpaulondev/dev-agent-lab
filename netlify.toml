@@ -26,6 +26,16 @@
   to = "/.netlify/functions/run"
   status = 200
 
+[[redirects]]
+  from = "/api/github/run"
+  to = "/.netlify/functions/github-run"
+  status = 200
+
+[[redirects]]
+  from = "/api/github/pr"
+  to = "/.netlify/functions/github-pr"
+  status = 200
+
 [[headers]]
   for = "/*"
   [headers.values]
