@@ -17,6 +17,8 @@ const state = {
   result: null,
   proposalToken: null,
   pr: null,
+  accessKey: '',
+  githubReposLoaded: false,
 };
 
 await init();
@@ -51,6 +53,10 @@ function wireEvents() {
     resetRunState(false);
     renderMode();
   });
+  $('unlockButton').addEventListener('click', unlockGitHub);
+  $('accessInput').addEventListener('keydown', event => {
+    if (event.key === 'Enter') unlockGitHub();
+  });
   $('runButton').addEventListener('click', runAgents);
   $('resetButton').addEventListener('click', () => resetRunState(true));
   $('openPrButton').addEventListener('click', openPullRequest);
@@ -61,13 +67,51 @@ function wireEvents() {
   document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => switchCodeView(button.dataset.view)));
 }
 
-function populateProjects() {
+function populateProjects(repos = []) {
   const select = $('projectSelect');
-  for (const repo of state.config?.allowedRepos || []) {
+  for (const option of [...select.options]) {
+    if (option.value !== 'sandbox') option.remove();
+  }
+  for (const repo of repos) {
     const option = document.createElement('option');
     option.value = `github:${repo}`;
     option.textContent = repo;
     select.appendChild(option);
+  }
+}
+
+function authHeaders() {
+  return state.accessKey ? { 'X-ForgePair-Access': state.accessKey } : {};
+}
+
+async function unlockGitHub() {
+  if (!state.config?.accessConfigured) return toast('Configure FORGEPAIR_ACCESS_KEY no Netlify primeiro.');
+  const key = $('accessInput').value;
+  if (!key) return toast('Digite a chave do operador.');
+  $('unlockButton').disabled = true;
+  $('unlockButton').textContent = 'Verificando…';
+  try {
+    const response = await fetch('/api/github/repos', { headers: { 'X-ForgePair-Access': key } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `Falha HTTP ${response.status}`);
+    state.accessKey = key;
+    state.githubReposLoaded = true;
+    $('accessInput').value = '';
+    populateProjects(payload.repos || []);
+    $('unlockStatus').textContent = `${payload.repos?.length || 0} repositório(s) autorizado(s). Chave mantida apenas nesta sessão.`;
+    $('unlockPanel').classList.add('unlocked');
+    renderConfig();
+    renderMode();
+    toast('ForgePair desbloqueado.');
+  } catch (error) {
+    state.accessKey = '';
+    state.githubReposLoaded = false;
+    populateProjects();
+    $('unlockStatus').textContent = error instanceof Error ? error.message : 'Acesso rejeitado.';
+    toast(error instanceof Error ? error.message : 'Acesso rejeitado.');
+  } finally {
+    $('unlockButton').disabled = false;
+    $('unlockButton').textContent = 'Desbloquear';
   }
 }
 
@@ -80,16 +124,23 @@ function renderConfig() {
   $('devModel').textContent = state.config.devModel;
   $('reviewModel').textContent = state.config.reviewModel;
   const status = $('connectionStatus');
-  if (state.config.groqConfigured && state.config.githubConfigured) {
+  if (state.config.groqConfigured && state.config.githubConfigured && state.githubReposLoaded) {
     status.className = 'topbar-status ready';
-    status.innerHTML = '<span class="status-dot"></span><span>Groq + GitHub prontos</span>';
+    status.innerHTML = '<span class="status-dot"></span><span>Groq + GitHub desbloqueados</span>';
+  } else if (state.config.groqConfigured && state.config.githubConfigured) {
+    status.className = 'topbar-status ready';
+    status.innerHTML = '<span class="status-dot"></span><span>Serviços prontos · acesso bloqueado</span>';
+  } else if (state.config.groqConfigured && !state.config.accessConfigured) {
+    status.className = 'topbar-status missing';
+    status.innerHTML = '<span class="status-dot"></span><span>Configure FORGEPAIR_ACCESS_KEY</span>';
   } else if (state.config.groqConfigured) {
     status.className = 'topbar-status ready';
-    status.innerHTML = '<span class="status-dot"></span><span>Groq pronto · GitHub não configurado</span>';
+    status.innerHTML = '<span class="status-dot"></span><span>Groq pronto · GitHub incompleto</span>';
   } else {
     status.className = 'topbar-status missing';
     status.innerHTML = '<span class="status-dot"></span><span>Configure GROQ_API_KEY</span>';
   }
+  $('unlockPanel').classList.toggle('hidden', !state.config.accessConfigured);
 }
 
 function renderMode() {
@@ -102,9 +153,11 @@ function renderMode() {
     : 'Workspace virtual sem escrita externa.';
   $('projectHelp').textContent = repo
     ? 'O servidor lê uma snapshot limitada do repo. O browser nunca recebe o token GitHub.'
-    : state.config?.githubConfigured
-      ? 'Escolha um repositório para trabalhar com código real ou mantenha o sandbox.'
-      : 'GitHub ainda não está configurado no servidor; o sandbox continua disponível.';
+    : state.githubReposLoaded
+      ? 'Escolha um repositório autorizado para trabalhar com código real ou mantenha o sandbox.'
+      : state.config?.githubConfigured
+        ? 'Desbloqueie o acesso do operador para carregar os repositórios autorizados.'
+        : 'GitHub ainda não está configurado no servidor; o sandbox continua disponível.';
   $('safetyCopy').textContent = repo
     ? 'GitHub: sem escrita em main, merge, deploy, workflows, infra ou secrets.'
     : 'Sandbox: sem shell, GitHub write, merge, deploy ou secrets.';
@@ -115,6 +168,7 @@ async function runAgents() {
   const task = $('taskInput').value.trim();
   if (!task) return toast('Escreva uma tarefa primeiro.');
   if (!state.config?.groqConfigured) return toast('Configure GROQ_API_KEY antes de executar.');
+  if (state.config?.accessConfigured && !state.accessKey) return toast('Desbloqueie o ForgePair com a chave do operador.');
 
   const repo = selectedRepo();
   if (repo && !state.config?.githubConfigured) return toast('Configure o modo GitHub no servidor primeiro.');
@@ -136,7 +190,7 @@ async function runAgents() {
       : { task, files: $('continueWorkspace').checked ? state.currentFiles : state.starterFiles };
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(payload),
     });
     if (!response.ok) {
@@ -300,7 +354,7 @@ async function openPullRequest() {
   try {
     const response = await fetch('/api/github/pr', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ proposalToken: state.proposalToken }),
     });
     const payload = await response.json().catch(() => ({}));
