@@ -3,10 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="color-scheme" content="light dark" />
-  <title>ForgePair — DevAgent Lab</title>
-  <meta name="description" content="Laboratório seguro para testar um DevAgent e um ReviewerAgent com Groq." />
+  <meta name="color-scheme" content="light" />
+  <title>ForgePair — Controlled Coding Agent</title>
+  <meta name="description" content="DevAgent + ReviewerAgent com fluxo controlado para GitHub." />
   <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/github.css" />
+  <link rel="stylesheet" href="/access.css" />
 </head>
 <body>
   <a class="skip-link" href="#workspace">Ir para o workspace</a>
@@ -16,40 +18,62 @@
         <div class="brand-mark" aria-hidden="true">F</div>
         <div>
           <p class="brand-name">ForgePair</p>
-          <p class="brand-subtitle">DevAgent Lab</p>
+          <p class="brand-subtitle">Controlled coding agent</p>
         </div>
       </div>
       <div class="topbar-status" id="connectionStatus" aria-live="polite">
         <span class="status-dot"></span>
-        <span>Verificando Groq…</span>
+        <span>Verificando serviços…</span>
       </div>
     </header>
 
     <main class="main-grid">
       <aside class="control-panel" aria-labelledby="taskHeading">
         <section class="panel intro-panel">
-          <div class="eyebrow">Sandbox controlado</div>
-          <h1 id="taskHeading">Dê uma tarefa ao par de agentes.</h1>
-          <p>O DevAgent implementa no workspace virtual. O ReviewerAgent tenta encontrar falhas e pode devolver a tarefa para correção.</p>
+          <div class="eyebrow">Dev → Review → PR</div>
+          <h1 id="taskHeading">O que você quer construir?</h1>
+          <p>Escolha um projeto. O DevAgent propõe a mudança, o Reviewer tenta encontrar falhas e o ForgePair só libera um PR quando os gates aprovam.</p>
         </section>
 
         <section class="panel task-panel">
-          <label for="taskInput">Tarefa</label>
-          <textarea id="taskInput" rows="9" maxlength="6000" spellcheck="true">Redesenhe este dashboard para parecer um produto moderno, calmo e profissional. Use uma base off-white, teal profundo como cor primária, estados semânticos discretos, cards com menos bordas e uma hierarquia de ações clara. Garanta responsividade até 320px, foco visível e sem novas dependências. Não invente funcionalidade de backend.</textarea>
-          <div class="preset-row" aria-label="Tarefas de teste">
-            <button class="chip" type="button" data-preset="visual">UI/UX completo</button>
-            <button class="chip" type="button" data-preset="a11y">Acessibilidade</button>
-            <button class="chip" type="button" data-preset="states">Estados</button>
+          <label for="projectSelect">Projeto</label>
+          <select id="projectSelect" class="project-select" aria-describedby="projectHelp">
+            <option value="sandbox">Sandbox local</option>
+          </select>
+          <p class="mode-note" id="projectHelp">O sandbox não escreve no GitHub.</p>
+
+          <div class="unlock-panel" id="unlockPanel">
+            <label for="accessInput">Chave do operador</label>
+            <div class="unlock-row">
+              <input id="accessInput" type="password" autocomplete="off" spellcheck="false" placeholder="FORGEPAIR_ACCESS_KEY" />
+              <button id="unlockButton" class="secondary-button" type="button">Desbloquear</button>
+            </div>
+            <p class="mode-note" id="unlockStatus">A chave fica apenas na memória desta página.</p>
           </div>
-          <label class="checkbox-row">
+
+          <label for="taskInput">Tarefa</label>
+          <textarea id="taskInput" rows="8" maxlength="5000" spellcheck="true" placeholder="Ex.: Melhore a página de login e corrija a responsividade em 320px."></textarea>
+
+          <div class="preset-row" aria-label="Tarefas rápidas">
+            <button class="chip" type="button" data-preset="visual">UI/UX</button>
+            <button class="chip" type="button" data-preset="a11y">Acessibilidade</button>
+            <button class="chip" type="button" data-preset="security">Segurança</button>
+          </div>
+
+          <label class="checkbox-row" id="continueRow">
             <input id="continueWorkspace" type="checkbox" />
             <span>Continuar do resultado anterior</span>
           </label>
+
           <div class="action-row">
-            <button id="runButton" class="primary-button" type="button">Executar agentes</button>
-            <button id="resetButton" class="secondary-button" type="button">Resetar sandbox</button>
+            <button id="runButton" class="primary-button" type="button">Executar tarefa</button>
+            <button id="resetButton" class="secondary-button" type="button">Resetar</button>
           </div>
-          <p class="microcopy">Nenhum agente possui shell, GitHub write, merge ou deploy nesta fase.</p>
+
+          <button id="openPrButton" class="primary-button pr-button hidden" type="button">Abrir PR no GitHub</button>
+          <div id="prResult" class="pr-result hidden" aria-live="polite"></div>
+
+          <p class="microcopy" id="safetyCopy">Sem shell, merge, deploy ou secrets.</p>
         </section>
 
         <section class="panel agents-panel" aria-labelledby="agentsHeading">
@@ -73,8 +97,9 @@
       <section class="workspace-area" id="workspace" tabindex="-1" aria-labelledby="workspaceHeading">
         <div class="workspace-header">
           <div>
-            <div class="eyebrow">Execução observável</div>
+            <div class="eyebrow" id="workspaceMode">Sandbox local</div>
             <h2 id="workspaceHeading">Workspace</h2>
+            <p class="workspace-context" id="workspaceContext">Aguardando uma tarefa.</p>
           </div>
           <div class="result-pill idle" id="resultPill">Aguardando tarefa</div>
         </div>
@@ -88,9 +113,9 @@
 
         <div class="workspace-grid">
           <section class="workspace-card timeline-card" aria-labelledby="timelineHeading">
-            <div class="card-heading"><h3 id="timelineHeading">Timeline</h3><button class="text-button" id="clearTimeline" type="button">Limpar</button></div>
+            <div class="card-heading"><h3 id="timelineHeading">Progresso</h3><button class="text-button" id="clearTimeline" type="button">Limpar</button></div>
             <div id="timeline" class="timeline" aria-live="polite">
-              <div class="empty-state"><span>◎</span><p>As ações dos agentes aparecem aqui sem expor raciocínio privado.</p></div>
+              <div class="empty-state"><span>◎</span><p>Analisando → Implementando → Quality checks → Reviewer → Pronto.</p></div>
             </div>
           </section>
 
@@ -98,14 +123,15 @@
             <div class="card-heading"><h3 id="reviewHeading">Última revisão</h3><span class="badge muted" id="reviewVerdict">sem review</span></div>
             <p class="review-summary" id="reviewSummary">O ReviewerAgent ainda não analisou nenhuma alteração.</p>
             <div id="reviewFindings" class="findings-list"></div>
+            <div id="qualityDetails" class="quality-details"></div>
           </section>
         </div>
 
         <section class="workspace-card code-card" aria-labelledby="codeHeading">
           <div class="code-toolbar">
             <div>
-              <div class="eyebrow">Virtual repository</div>
-              <h3 id="codeHeading">Arquivos e diff</h3>
+              <div class="eyebrow" id="repoLabel">Workspace controlado</div>
+              <h3 id="codeHeading">Alterações</h3>
             </div>
             <div class="tablist" role="tablist" aria-label="Visualização de código">
               <button class="tab active" type="button" role="tab" aria-selected="true" data-view="files">Arquivos</button>

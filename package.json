@@ -1,14 +1,14 @@
 {
   "name": "devagent-reviewer-lab",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Safe DevAgent + ReviewerAgent laboratory powered by Groq local tool calling.",
+  "description": "Safe DevAgent + ReviewerAgent lab with controlled GitHub PR flow powered by Groq.",
   "scripts": {
     "dev": "node --watch server.mjs",
     "start": "node server.mjs",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check server.mjs && node --check src/agents.mjs && node --check src/workspace.mjs && node --check public/app.js && npm test",
+    "check": "node --check server.mjs && node --check src/agents.mjs && node --check src/compact-agents.mjs && node --check src/github-runtime.mjs && node --check src/workspace.mjs && node --check netlify/functions/github-repos.mjs && node --check netlify/functions/github-run.mjs && node --check netlify/functions/github-pr.mjs && node --check public/app.js && npm test",
     "smoke": "node scripts/smoke-agent.mjs"
   },
   "engines": {
