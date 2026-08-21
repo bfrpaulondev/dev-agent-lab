@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <title>ForgePair — DevAgent Lab</title>
+  <meta name="description" content="Laboratório seguro para testar um DevAgent e um ReviewerAgent com Groq." />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#workspace">Ir para o workspace</a>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">F</div>
+        <div>
+          <p class="brand-name">ForgePair</p>
+          <p class="brand-subtitle">DevAgent Lab</p>
+        </div>
+      </div>
+      <div class="topbar-status" id="connectionStatus" aria-live="polite">
+        <span class="status-dot"></span>
+        <span>Verificando Groq…</span>
+      </div>
+    </header>
+
+    <main class="main-grid">
+      <aside class="control-panel" aria-labelledby="taskHeading">
+        <section class="panel intro-panel">
+          <div class="eyebrow">Sandbox controlado</div>
+          <h1 id="taskHeading">Dê uma tarefa ao par de agentes.</h1>
+          <p>O DevAgent implementa no workspace virtual. O ReviewerAgent tenta encontrar falhas e pode devolver a tarefa para correção.</p>
+        </section>
+
+        <section class="panel task-panel">
+          <label for="taskInput">Tarefa</label>
+          <textarea id="taskInput" rows="9" maxlength="6000" spellcheck="true">Redesenhe este dashboard para parecer um produto moderno, calmo e profissional. Use uma base off-white, teal profundo como cor primária, estados semânticos discretos, cards com menos bordas e uma hierarquia de ações clara. Garanta responsividade até 320px, foco visível e sem novas dependências. Não invente funcionalidade de backend.</textarea>
+          <div class="preset-row" aria-label="Tarefas de teste">
+            <button class="chip" type="button" data-preset="visual">UI/UX completo</button>
+            <button class="chip" type="button" data-preset="a11y">Acessibilidade</button>
+            <button class="chip" type="button" data-preset="states">Estados</button>
+          </div>
+          <label class="checkbox-row">
+            <input id="continueWorkspace" type="checkbox" />
+            <span>Continuar do resultado anterior</span>
+          </label>
+          <div class="action-row">
+            <button id="runButton" class="primary-button" type="button">Executar agentes</button>
+            <button id="resetButton" class="secondary-button" type="button">Resetar sandbox</button>
+          </div>
+          <p class="microcopy">Nenhum agente possui shell, GitHub write, merge ou deploy nesta fase.</p>
+        </section>
+
+        <section class="panel agents-panel" aria-labelledby="agentsHeading">
+          <div class="section-heading-row">
+            <h2 id="agentsHeading">Agentes</h2>
+            <span class="badge">2-agent loop</span>
+          </div>
+          <article class="agent-card">
+            <div class="agent-avatar dev" aria-hidden="true">D</div>
+            <div class="agent-card-copy"><strong>DevAgent</strong><span id="devModel">—</span></div>
+            <span class="agent-state" id="devState">pronto</span>
+          </article>
+          <article class="agent-card">
+            <div class="agent-avatar review" aria-hidden="true">R</div>
+            <div class="agent-card-copy"><strong>ReviewerAgent</strong><span id="reviewModel">—</span></div>
+            <span class="agent-state" id="reviewState">pronto</span>
+          </article>
+        </section>
+      </aside>
+
+      <section class="workspace-area" id="workspace" tabindex="-1" aria-labelledby="workspaceHeading">
+        <div class="workspace-header">
+          <div>
+            <div class="eyebrow">Execução observável</div>
+            <h2 id="workspaceHeading">Workspace</h2>
+          </div>
+          <div class="result-pill idle" id="resultPill">Aguardando tarefa</div>
+        </div>
+
+        <section class="metrics-grid" aria-label="Resumo da execução">
+          <article class="metric-card"><span>Review score</span><strong id="reviewScore">—</strong><small>/ 100</small></article>
+          <article class="metric-card"><span>Arquivos alterados</span><strong id="changedFiles">0</strong><small>neste run</small></article>
+          <article class="metric-card"><span>Quality findings</span><strong id="qualityFindings">—</strong><small>determinísticos</small></article>
+          <article class="metric-card"><span>Ciclos</span><strong id="reviewCycles">0</strong><small>Dev → Review</small></article>
+        </section>
+
+        <div class="workspace-grid">
+          <section class="workspace-card timeline-card" aria-labelledby="timelineHeading">
+            <div class="card-heading"><h3 id="timelineHeading">Timeline</h3><button class="text-button" id="clearTimeline" type="button">Limpar</button></div>
+            <div id="timeline" class="timeline" aria-live="polite">
+              <div class="empty-state"><span>◎</span><p>As ações dos agentes aparecem aqui sem expor raciocínio privado.</p></div>
+            </div>
+          </section>
+
+          <section class="workspace-card review-card" aria-labelledby="reviewHeading">
+            <div class="card-heading"><h3 id="reviewHeading">Última revisão</h3><span class="badge muted" id="reviewVerdict">sem review</span></div>
+            <p class="review-summary" id="reviewSummary">O ReviewerAgent ainda não analisou nenhuma alteração.</p>
+            <div id="reviewFindings" class="findings-list"></div>
+          </section>
+        </div>
+
+        <section class="workspace-card code-card" aria-labelledby="codeHeading">
+          <div class="code-toolbar">
+            <div>
+              <div class="eyebrow">Virtual repository</div>
+              <h3 id="codeHeading">Arquivos e diff</h3>
+            </div>
+            <div class="tablist" role="tablist" aria-label="Visualização de código">
+              <button class="tab active" type="button" role="tab" aria-selected="true" data-view="files">Arquivos</button>
+              <button class="tab" type="button" role="tab" aria-selected="false" data-view="diff">Diff</button>
+            </div>
+          </div>
+          <div class="code-layout" id="filesView">
+            <nav class="file-list" id="fileList" aria-label="Arquivos do workspace"></nav>
+            <pre class="code-view"><code id="fileContent"></code></pre>
+          </div>
+          <pre class="diff-view hidden" id="diffView"><code id="diffContent">Nenhuma alteração ainda.</code></pre>
+        </section>
+      </section>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

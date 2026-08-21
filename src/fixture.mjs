@@ -1,0 +1,11 @@
+export const starterWorkspace = Object.freeze({
+  'package.json': JSON.stringify({
+    name: 'ui-sandbox',
+    private: true,
+    scripts: { test: 'vitest run', build: 'vite build' },
+    dependencies: { react: '^19.0.0', 'react-dom': '^19.0.0' },
+  }, null, 2),
+  'src/App.tsx': `import './styles.css';\n\ntype Task = { id: string; title: string; status: 'pending' | 'done' };\n\nconst tasks: Task[] = [\n  { id: '1', title: 'Review the release checklist', status: 'pending' },\n  { id: '2', title: 'Confirm the design handoff', status: 'done' },\n  { id: '3', title: 'Prepare next sprint', status: 'pending' },\n];\n\nexport default function App() {\n  return (\n    <main className="page">\n      <header>\n        <p>Workspace</p>\n        <h1>Team dashboard</h1>\n        <button>New task</button>\n      </header>\n      <section className="stats">\n        <article><strong>12</strong><span>Open</span></article>\n        <article><strong>7</strong><span>Done</span></article>\n        <article><strong>3</strong><span>Blocked</span></article>\n      </section>\n      <section className="tasks">\n        <h2>Today</h2>\n        {tasks.map(task => (\n          <div className="task" key={task.id}>\n            <span>{task.title}</span>\n            <span>{task.status}</span>\n          </div>\n        ))}\n      </section>\n    </main>\n  );\n}\n`,
+  'src/styles.css': `* { box-sizing: border-box; }\nbody { margin: 0; font-family: Arial, sans-serif; background: white; color: black; }\n.page { width: 980px; margin: 40px auto; }\nheader { border: 2px solid black; padding: 20px; }\nbutton { background: black; color: white; padding: 10px 14px; border: 0; }\n.stats { display: flex; gap: 8px; margin-top: 8px; }\n.stats article { flex: 1; border: 2px solid black; padding: 18px; }\n.stats strong, .stats span { display: block; }\n.tasks { border: 2px solid black; margin-top: 8px; padding: 18px; }\n.task { display: flex; justify-content: space-between; border-top: 1px solid #999; padding: 14px 0; }\n`,
+  'README.md': `# UI Sandbox\n\nA deliberately basic React/TypeScript dashboard used to evaluate the DevAgent and ReviewerAgent.\n\n## Constraints\n- Keep React + TypeScript.\n- No new external dependencies for visual-only tasks.\n- Mobile width down to 320px must remain usable.\n- Keyboard focus must remain visible.\n`,
+});
