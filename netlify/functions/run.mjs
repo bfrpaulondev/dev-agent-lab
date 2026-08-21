@@ -31,8 +31,11 @@ function prepareGroqInit(init = {}) {
 }
 
 function rateLimitDelayMs(response, raw = '') {
-  const retryAfter = Number(response?.headers?.get?.('retry-after'));
-  if (Number.isFinite(retryAfter) && retryAfter >= 0) return Math.ceil(retryAfter * 1000) + 250;
+  const retryAfterHeader = response?.headers?.get?.('retry-after');
+  if (retryAfterHeader !== null && retryAfterHeader !== undefined && retryAfterHeader !== '') {
+    const retryAfter = Number(retryAfterHeader);
+    if (Number.isFinite(retryAfter) && retryAfter >= 0) return Math.ceil(retryAfter * 1000) + 250;
+  }
 
   const reset = String(response?.headers?.get?.('x-ratelimit-reset-tokens') || '');
   const resetMatch = reset.match(/^([0-9.]+)s$/i);
