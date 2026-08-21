@@ -6,7 +6,7 @@ This repository evaluates and operates a DevAgent + ReviewerAgent pair with two 
 - controlled GitHub mode: authenticated operator reads an explicitly allowlisted repository, produces reviewed changes, then creates an `agent/...` branch and pull request from a server-signed approved proposal.
 
 ## Non-negotiable rules
-- Never expose `GROQ_API_KEY`, `GITHUB_AGENT_TOKEN`, or `FORGEPAIR_ACCESS_KEY` to browser-visible configuration, model output, logs, audit text, diffs, or tool results.
+- Never expose `OPENAI_API_KEY`, `GITHUB_AGENT_TOKEN`, or `FORGEPAIR_ACCESS_KEY` to browser-visible configuration, model output, logs, audit text, diffs, or tool results.
 - Agent actions must require `FORGEPAIR_ACCESS_KEY` whenever it is configured. Controlled GitHub actions must not run without operator access configured.
 - GitHub repositories must be explicitly listed in `GITHUB_ALLOWED_REPOS`; do not expose that list before operator authentication.
 - Never write directly to the default branch or `main`.
@@ -19,6 +19,12 @@ This repository evaluates and operates a DevAgent + ReviewerAgent pair with two 
 - Do not display hidden reasoning. UI may display actions, quality results, findings, concise summaries, diffs and PR metadata only.
 - Keep model IDs configurable via environment variables.
 - Every run must have deterministic request, workspace, file-count, file-size and review-cycle limits.
+
+## Model-provider boundary
+- Production agent calls use the OpenAI Responses API with `OPENAI_API_KEY` server-side only.
+- Default DevAgent model is `gpt-5.4-mini`; default ReviewerAgent model is `gpt-5-mini`.
+- Do not silently fall back to another provider when OpenAI credit, quota, authentication, or rate limits fail.
+- Keep output-token and review-cycle caps explicit to control spend.
 
 ## GitHub permission boundary
 Controlled GitHub mode may:
