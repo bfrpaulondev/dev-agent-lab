@@ -56,7 +56,8 @@ test('review envelope parses findings and normalization enforces blocking severi
   assert.equal(review.findings[0].file, 'src/styles.css');
 });
 
-test('compact requests disable Qwen reasoning and keep GPT-OSS reviewer reasoning low', () => {
-  assert.equal(compactInternals.modelReasoningEffort('qwen/qwen3.6-27b'), 'none');
-  assert.equal(compactInternals.modelReasoningEffort('openai/gpt-oss-120b'), 'low');
+test('OpenAI compact requests use low reasoning for coding and review models', () => {
+  assert.equal(compactInternals.modelReasoningEffort('gpt-5.4-mini', 'dev'), 'low');
+  assert.equal(compactInternals.modelReasoningEffort('gpt-5-mini', 'reviewer'), 'low');
+  assert.equal(compactInternals.modelReasoningEffort('gpt-5.4-mini', 'reviewer'), 'none');
 });
