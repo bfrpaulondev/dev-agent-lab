@@ -23,6 +23,10 @@ ForgePair is a controlled coding-agent workspace powered by Groq. It keeps the i
 
 The GitHub mode **cannot** write to `main`/the default branch, merge PRs, deploy, change DNS/hosting, run arbitrary shell commands, or access repository/cloud secrets.
 
+## First controlled GitHub test
+
+This first controlled GitHub test demonstrates that ForgePair creates changes only on `agent/...` branches, opens pull requests for human review, and never performs automatic merges or deployments. All modifications remain isolated until a human explicitly approves the pull request.
+
 ## Required Netlify environment variables
 
 ```text
