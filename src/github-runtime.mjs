@@ -109,12 +109,17 @@ function taskTokens(task) {
   )];
 }
 
-function scorePath(filePath, task) {
-  const pathLower = filePath.toLowerCase();
+function isTaskExplicitPath(filePath, task) {
+  const pathLower = String(filePath || '').toLowerCase();
   const taskPathText = String(task || '').replace(/\\/g, '/').toLowerCase();
   const basename = pathLower.split('/').pop() || '';
+  return taskPathText.includes(pathLower) || (basename.length >= 4 && taskPathText.includes(basename));
+}
+
+function scorePath(filePath, task) {
+  const pathLower = filePath.toLowerCase();
   let score = 0;
-  if (taskPathText.includes(pathLower) || (basename.length >= 4 && taskPathText.includes(basename))) score += 5_000;
+  if (isTaskExplicitPath(filePath, task)) score += 5_000;
   if (ALWAYS_READ.has(filePath)) score += filePath === 'AGENTS.md' ? 1200 : filePath === 'package.json' ? 700 : 450;
   if (/^(src|app|pages|public|lib|server|api)\//.test(pathLower)) score += 80;
   if (/(app|main|index|server|route|controller|service|styles?)\.[a-z0-9]+$/.test(pathLower)) score += 110;
@@ -140,8 +145,19 @@ function scorePath(filePath, task) {
 export function selectSnapshotEntries(treeEntries, task) {
   return (Array.isArray(treeEntries) ? treeEntries : [])
     .filter(isCandidateBlob)
-    .map(entry => ({ ...entry, score: scorePath(entry.path, task) }))
+    .map(entry => ({ ...entry, explicit: isTaskExplicitPath(entry.path, task), score: scorePath(entry.path, task) }))
     .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
+}
+
+function selectSnapshotCandidates(rankedEntries) {
+  const ranked = Array.isArray(rankedEntries) ? rankedEntries : [];
+  const explicit = ranked.filter(entry => entry.explicit === true);
+  if (!explicit.length) return ranked;
+
+  const support = ranked.find(entry =>
+    entry.explicit !== true && (entry.path === 'AGENTS.md' || entry.path === 'package.json'))
+    || ranked.find(entry => entry.explicit !== true);
+  return [...explicit, ...(support ? [support] : [])].slice(0, MAX_SNAPSHOT_FILES);
 }
 
 async function githubRequest(endpoint, options = {}) {
@@ -193,11 +209,12 @@ export async function loadRepositorySnapshot(repoInput, task) {
 
   const existingPaths = new Set((tree?.tree || []).map(entry => entry.path).filter(Boolean));
   const ranked = selectSnapshotEntries(tree?.tree, task);
+  const candidates = selectSnapshotCandidates(ranked);
   const files = {};
   const metadata = {};
   let total = 0;
 
-  for (const entry of ranked) {
+  for (const entry of candidates) {
     if (Object.keys(files).length >= MAX_SNAPSHOT_FILES) break;
     if (entry.size && total + entry.size > MAX_SNAPSHOT_BYTES && Object.keys(files).length >= 2) continue;
     const blob = await githubRequest(`/repos/${repo}/git/blobs/${entry.sha}`);
@@ -397,7 +414,9 @@ export async function openPullRequestFromProposal(proposalToken) {
 export const githubInternals = {
   normalizeRepo,
   isSensitivePath,
+  isTaskExplicitPath,
   selectSnapshotEntries,
+  selectSnapshotCandidates,
   scorePath,
   changedFilesForProposal,
   branchSlug,
