@@ -8,6 +8,7 @@
   <meta name="description" content="DevAgent + ReviewerAgent com fluxo controlado para GitHub." />
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/github.css" />
+  <link rel="stylesheet" href="/access.css" />
 </head>
 <body>
   <a class="skip-link" href="#workspace">Ir para o workspace</a>
@@ -40,6 +41,15 @@
             <option value="sandbox">Sandbox local</option>
           </select>
           <p class="mode-note" id="projectHelp">O sandbox não escreve no GitHub.</p>
+
+          <div class="unlock-panel" id="unlockPanel">
+            <label for="accessInput">Chave do operador</label>
+            <div class="unlock-row">
+              <input id="accessInput" type="password" autocomplete="off" spellcheck="false" placeholder="FORGEPAIR_ACCESS_KEY" />
+              <button id="unlockButton" class="secondary-button" type="button">Desbloquear</button>
+            </div>
+            <p class="mode-note" id="unlockStatus">A chave fica apenas na memória desta página.</p>
+          </div>
 
           <label for="taskInput">Tarefa</label>
           <textarea id="taskInput" rows="8" maxlength="5000" spellcheck="true" placeholder="Ex.: Melhore a página de login e corrija a responsividade em 320px."></textarea>
