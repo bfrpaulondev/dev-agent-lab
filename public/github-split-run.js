@@ -43,7 +43,7 @@ globalThis.fetch = async (input, init) => {
 
   const headers = new Headers(init?.headers || {});
   headers.set('Content-Type', 'application/json');
-  const reviewResponse = await nativeFetch('/api/github/review', {
+  const reviewResponse = await nativeFetch('/.netlify/functions/github-review', {
     method: 'POST',
     headers,
     body: JSON.stringify({ reviewToken }),
