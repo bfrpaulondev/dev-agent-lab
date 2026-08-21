@@ -4,8 +4,8 @@ ForgePair is a controlled coding-agent workspace powered by the OpenAI API. It k
 
 ## Default models
 
-- DevAgent: `gpt-5.4-mini` with low reasoning — strong cost-sensitive coding/subagent model.
-- ReviewerAgent: `gpt-5-mini` with low reasoning — independent lower-cost review.
+- DevAgent: `gpt-5.4-mini` with `reasoning=none` in controlled GitHub mode.
+- ReviewerAgent: `gpt-5.4-mini` with `reasoning=none` in controlled GitHub mode.
 
 Both defaults can be overridden with server-side environment variables. The production agent path uses the OpenAI Responses API and never exposes the API key to the browser.
 
@@ -23,11 +23,15 @@ Both defaults can be overridden with server-side environment variables. The prod
 - reads only repositories in `GITHUB_ALLOWED_REPOS`;
 - selects a bounded task-relevant snapshot from the repository default branch;
 - when a task explicitly names repository files, prioritizes those files and keeps extra context small;
-- runs the same DevAgent → ReviewerAgent loop;
+- runs DevAgent and ReviewerAgent as two separate bounded serverless invocations so a combined model run cannot exhaust a single function timeout;
+- signs the DevAgent intermediate change set server-side before the Reviewer invocation;
+- ReviewerAgent reloads the repository snapshot and requires the same base branch/tree SHA before reviewing the signed changes;
 - blocks protected paths such as `.github/**`, `AGENTS.md`, environment/secrets, hosting and infra configuration;
 - after approval, signs the exact proposed file changes server-side;
 - only an intact, unexpired signed proposal can create one commit on a new `agent/...` branch and open a PR;
 - re-checks the base branch SHA immediately before PR creation.
+
+The browser coordinates the two HTTP calls after one **Executar tarefa** click, but it cannot modify the signed intermediate change set. If the base branch changes between DevAgent and ReviewerAgent, the run is rejected and must be started again.
 
 The GitHub mode **cannot** write to `main`/the default branch, merge PRs, deploy, change DNS/hosting, run arbitrary shell commands, or access repository/cloud secrets.
 
@@ -48,7 +52,7 @@ Optional model/loop variables:
 
 ```text
 DEV_MODEL=gpt-5.4-mini
-REVIEW_MODEL=gpt-5-mini
+REVIEW_MODEL=gpt-5.4-mini
 MAX_REVIEW_CYCLES=2
 MAX_COMPACT_REVIEW_CYCLES=2
 ```
@@ -62,18 +66,21 @@ Secrets are server-side only. `/api/config` exposes only readiness booleans/mode
 - `GET /api/starter`
 - `POST /api/run` — sandbox agent run; operator key is required when configured
 - `GET /api/github/repos` — authenticated allowlist discovery
-- `POST /api/github/run` — authenticated read of allowlisted repo + agent/reviewer run
+- `POST /api/github/run` — authenticated repository snapshot + DevAgent stage
+- `POST /.netlify/functions/github-review` — internal authenticated ReviewerAgent stage called by the browser orchestrator
 - `POST /api/github/pr` — authenticated signed-proposal verification + branch/PR creation
 
 ## Current GitHub-mode limits
 
 The first authority level deliberately keeps repository context small to reduce model cost and avoid irrelevant context. It selects a small set of safe text files with deterministic file/workspace size bounds. It does not clone the repository or execute its real build/test scripts yet. The UI and PR body must not claim shell tests/builds/deploys were run.
 
+Controlled GitHub mode currently performs one Dev stage followed by one independent Review stage per run. If ReviewerAgent requests changes, start a new run with the findings rather than performing an unbounded correction loop inside one serverless invocation.
+
 The next authority level should use an isolated ephemeral runner for cloning and executing allowlisted test commands, while keeping merge/deploy/secrets outside the agent boundary.
 
-## Cost control
+## Cost and latency control
 
-ForgePair intentionally uses bounded snapshots, compact plain-text envelopes, capped output tokens and at most two Dev → Reviewer cycles. OpenAI usage is returned by the API for observability, while billing/credit remains controlled in the OpenAI project. If API credit is exhausted, ForgePair fails safely instead of falling back to another provider.
+ForgePair uses bounded snapshots, compact plain-text envelopes, capped output tokens and low-latency reasoning settings. Each OpenAI request has a timeout below the observed serverless execution limit so the app can return a safe retryable error instead of an opaque platform timeout. OpenAI usage is returned by the API for observability, while billing/credit remains controlled in the OpenAI project. If API credit is exhausted, ForgePair fails safely instead of falling back to another provider.
 
 ## Quality
 
@@ -81,7 +88,7 @@ ForgePair intentionally uses bounded snapshots, compact plain-text envelopes, ca
 npm run check
 ```
 
-CI runs the same command on pull requests and pushes to `main`. Unit tests cover virtual-workspace safety, reviewer normalization, product-truthfulness gates, GitHub allowlisting, protected paths, proposal signing/tamper resistance, OpenAI response parsing and rate-limit handling.
+CI runs the same command on pull requests and pushes to `main`. Unit tests cover virtual-workspace safety, reviewer normalization, product-truthfulness gates, GitHub allowlisting, protected paths, proposal signing/tamper resistance, signed review-stage tamper resistance, OpenAI response parsing and latency bounds.
 
 ## Local sandbox
 

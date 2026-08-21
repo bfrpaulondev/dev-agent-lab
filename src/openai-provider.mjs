@@ -1,6 +1,7 @@
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
-const MAX_RETRIES = 2;
-const MAX_TOTAL_WAIT_MS = 15_000;
+const REQUEST_TIMEOUT_MS = 22_000;
+const MAX_RETRIES = 0;
+const MAX_TOTAL_WAIT_MS = 0;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -73,15 +74,23 @@ export async function openaiText({
 
   let waitedMs = 0;
   for (let attempt = 0; ; attempt += 1) {
-    const response = await fetch(OPENAI_RESPONSES_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(90_000),
-    });
+    let response;
+    try {
+      response = await fetch(OPENAI_RESPONSES_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    } catch (error) {
+      if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+        throw Object.assign(new Error('OpenAI stage timed out before the serverless execution limit. Retry the task.'), { statusCode: 504 });
+      }
+      throw error;
+    }
 
     const raw = await response.text();
     let payload = null;
@@ -112,4 +121,5 @@ export const openaiProviderInternals = {
   extractOutputText,
   publicOpenAIError,
   retryDelayMs,
+  requestTimeoutMs: REQUEST_TIMEOUT_MS,
 };

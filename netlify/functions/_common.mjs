@@ -11,7 +11,7 @@ export function json(statusCode, payload, headers = {}) {
 
 export function publicError(error) {
   const message = error instanceof Error ? error.message : 'Request failed.';
-  if (/API key|OpenAI|GitHub|Repository|proposal|base branch|operator access|Task must|workspace|rate|quota|billing|credit|too many|request is too large|origin/i.test(message)) return message.slice(0, 300);
+  if (/API key|OpenAI|GitHub|Repository|proposal|review stage|base branch|operator access|Task must|workspace|rate|quota|billing|credit|timeout|timed out|too many|request is too large|origin/i.test(message)) return message.slice(0, 300);
   return 'The request could not be completed safely.';
 }
 
@@ -29,7 +29,7 @@ function accessHeader(event) {
 
 function isGitHubAction(event) {
   const path = String(event.path || event.rawUrl || '');
-  return /(?:\/api\/github\/|github-(?:run|pr|repos))/i.test(path);
+  return /(?:\/api\/github\/|github-(?:run|review|pr|repos))/i.test(path);
 }
 
 function assertOperatorAccess(event) {

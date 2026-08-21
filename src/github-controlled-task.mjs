@@ -1,0 +1,3 @@
+export function controlledGitHubTask(task, snapshot) {
+  return `${String(task || '').trim()}\n\nCONTROLLED GITHUB MODE:\n- You are editing a bounded, task-relevant snapshot from ${snapshot.repo}@${snapshot.baseBranch}; unseen repository files may exist.\n- Do not modify AGENTS.md, .github/, CI/workflows, hosting/infra configuration, secrets, credentials, or environment files.\n- Do not claim that shell tests, builds, deployment, merge, database operations, or external actions ran. Only deterministic workspace checks and ReviewerAgent review are available in this phase.\n- Prefer the smallest coherent change that can be justified from the visible snapshot.`;
+}

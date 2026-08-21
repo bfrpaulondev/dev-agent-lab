@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { selectSnapshotEntries } from '../src/github-runtime.mjs';
-import { githubRunInternals } from '../netlify/functions/github-run.mjs';
+import { githubReviewInternals } from '../netlify/functions/github-review.mjs';
 
 test('explicitly named existing file wins snapshot selection priority', () => {
   const entries = [
@@ -42,7 +42,7 @@ test('GitHub result suppresses deterministic findings that already existed in th
     },
   };
 
-  githubRunInternals.filterBaselineQuality(result, { findings: [baselineFinding] });
+  githubReviewInternals.filterBaselineQuality(result, { findings: [baselineFinding] });
 
   assert.deepEqual(result.quality.findings, [newFinding]);
   assert.equal(result.quality.baselineFindingsSuppressed, 1);

@@ -19,7 +19,8 @@ test('Netlify health/config/starter handlers are deployable without an OpenAI ke
   assert.equal(configBody.provider, 'openai');
   assert.equal(typeof configBody.openaiConfigured, 'boolean');
   assert.equal(configBody.devModel, 'gpt-5.4-mini');
-  assert.equal(configBody.reviewModel, 'gpt-5-mini');
+  assert.equal(configBody.reviewModel, 'gpt-5.4-mini');
+  assert.equal(configBody.githubSplitExecution, true);
 
   const starterResponse = await starter({});
   assert.equal(starterResponse.statusCode, 200);
