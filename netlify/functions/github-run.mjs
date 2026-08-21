@@ -91,7 +91,7 @@ export const handler = async event => {
       emit,
     }));
 
-    enforceGitHubWritePolicy(result);
+    enforceGitHubWritePolicy(result, snapshot);
     const proposalToken = createProposalToken(snapshot, task, result);
 
     result.github = {
