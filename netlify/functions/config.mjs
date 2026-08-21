@@ -7,8 +7,9 @@ export const handler = async () => json(200, {
   accessConfigured: operatorAccessConfigured(),
   githubConfigured: githubConfigured() && operatorAccessConfigured(),
   devModel: process.env.DEV_MODEL || 'gpt-5.4-mini',
-  reviewModel: process.env.REVIEW_MODEL || 'gpt-5-mini',
+  reviewModel: process.env.REVIEW_MODEL || 'gpt-5.4-mini',
   maxReviewCycles: Number(process.env.MAX_REVIEW_CYCLES || 2),
+  githubSplitExecution: true,
   safety: [
     'sandbox mode remains virtual only',
     'agent actions require operator access when configured',
